@@ -7,15 +7,20 @@ from lib.tree_decomp import RNAJunctionTree
 from tqdm import tqdm
 
 def preprocess(args):
-    return RNAJunctionTree(*args)
+    try:
+        obj = RNAJunctionTree(*args)
+    except IndexError:
+        # print(args)
+        return []
+    return obj
 
 if __name__ == "__main__":
-    if not os.path.exists('data/rna_dataset_32.csv'):
+    if not os.path.exists('data/rna_dataset_128.csv'):
         # after removing the duplicate RNA examples
         # the actual size of the dataset might be smaller than 100000
-        generate_seq_dataset(size=100000, length=32)
+        generate_seq_dataset(size=100000, length=128)
 
-    file = pd.read_csv('data/rna_dataset_32.csv')
+    file = pd.read_csv('data/rna_dataset_128.csv')
 
     # all_rna_jt = []
     # for seq, struct in zip(file['seq'], file['struct']):
@@ -23,11 +28,13 @@ if __name__ == "__main__":
 
     pool = mp.Pool(8)
     all_rna_jt = list(tqdm(pool.map(preprocess, zip(file['seq'], file['struct']))))
+    while [] in all_rna_jt:
+        all_rna_jt.remove([])
 
     if not os.path.exists('./data/rna_jt'):
         os.makedirs('./data/rna_jt')
 
-    with open('./data/rna_jt/rna_jt.obj', 'wb') as file:
+    with open('./data/rna_jt/rna_jt_128.obj', 'wb') as file:
         pickle.dump(all_rna_jt, file)
 
 

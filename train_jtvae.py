@@ -9,6 +9,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 
 from model.VAE import JunctionTreeVAE
 from lib.data_utils import JunctionTreeFolder
+import lib.plot
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -16,8 +17,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--hidden_size', type=int, default=450)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--latent_size', type=int, default=56)
-parser.add_argument('--depthT', type=int, default=20)
-parser.add_argument('--depthG', type=int, default=3)
+parser.add_argument('--depthT', type=int, default=40)
+parser.add_argument('--depthG', type=int, default=10)
 
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--clip_norm', type=float, default=50.0)
@@ -36,6 +37,8 @@ parser.add_argument('--save_iter', type=int, default=5000)
 args = parser.parse_args()
 print(args)
 
+lib.plot.set_output_dir('./')
+lib.plot.suppress_stdout()
 
 model = JunctionTreeVAE(args.hidden_size, args.latent_size, args.depthT, args.depthG).to(device)
 print(model)
@@ -81,8 +84,14 @@ for epoch in range(args.epoch):
             meters /= args.print_iter
             print("[%d] Beta: %.3f, KL: %.2f, Word: %.2f, Topo: %.2f, PNorm: %.2f, GNorm: %.2f" % (
             total_step, beta, meters[0], meters[1], meters[2], param_norm(model), grad_norm(model)))
+            lib.plot.plot('word acc', meters[1])
+            lib.plot.plot('topo acc', meters[2])
+            lib.plot.flush()
             sys.stdout.flush()
             meters *= 0
+
+        lib.plot.tick()
+
 
         if total_step % args.save_iter == 0:
             torch.save(model.state_dict(), args.save_dir + "/model.iter-" + str(total_step))

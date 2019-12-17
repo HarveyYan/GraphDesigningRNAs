@@ -174,6 +174,11 @@ def decompose(dotbracket_struct):
 
 if __name__ == "__main__":
     np.set_printoptions(threshold=np.inf, edgeitems=30, linewidth=100000, )
+
+    decompose('(((((.(((..(((((....((....))....))))).......((((.............))))....))).))))).((((...(((.(((.......))))))..(((((....)))))))))..')
+
+    exit()
+
     adjmat, node_labels, hpn_nodes_assignment = decompose(
         "....((((((....((.......((((.((((.(((...(((((..........)))))...((.......))....)))......))))))))......))...)).))))......(((....((((((((...))))))))...)))........")
     print(adjmat.todense())
