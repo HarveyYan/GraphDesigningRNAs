@@ -4,8 +4,10 @@ import forgi.graph.bulge_graph as fgb
 import scipy.sparse as sp
 
 NUC_VOCAB = ['A', 'C', 'G', 'U']
-HYPERGRAPH_VOCAB = ['F', 'T', 'H', 'I', 'M', 'S']
-# dangling start, dangling end, hairpin loop, internal loop, multiloop, stem
+HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S', 'P']
+
+
+# hairpin loop, internal loop, multiloop, stem, pseudo root node
 
 class RNAJTNode:
 
@@ -85,7 +87,7 @@ def decompose(dotbracket_struct):
                             [hypernodes[stem_id][0][-1], hypernodes[stem_id][0][-1] + 1],
                             list(range(int(tokens[1]) - 2, int(tokens[2]) + 1))]
                     else:
-                        raise ValueError()
+                        raise ValueError('Internal loop parsing error')
                 else:
                     hypernodes[hp_node_id] = [
                         list(range(int(tokens[1]) - 2, int(tokens[2]) + 1)),  # closer to 5'UTR
@@ -97,9 +99,25 @@ def decompose(dotbracket_struct):
                     # todo: double check
                     # todo: external regions really
                     # todo: replace with new hypernode id
-                    stem_id = bg.connections(hp_node_id.lower())[0].upper()
-                    side = int(np.argmax(bg.get_sides(stem_id.lower(), hp_node_id.lower())))
-                    hypernodes[hp_node_id] = [hypernodes[stem_id][side][-1], hypernodes[stem_id][side][-1] + 1]
+                    # stem_id = bg.connections(hp_node_id.lower())[0].upper()
+                    # side = int(np.argmax(bg.get_sides(stem_id.lower(), hp_node_id.lower())))
+                    # hypernodes[hp_node_id] = [hypernodes[stem_id][side][-1], hypernodes[stem_id][side][-1] + 1]
+
+                    stem_ids = [stem_id.upper() for stem_id in bg.connections(hp_node_id.lower())]
+                    e_3_idx, e_5_idx = hypernodes[stem_ids[0]]
+                    l_3_idx, l_5_idx = hypernodes[stem_ids[1]]
+                    # e_3_idx always comes before l_3_idx, and e_5_idx always comes after l_5_idx
+                    # except on the external region
+                    if e_3_idx[-1] + 1 == l_3_idx[0]:
+                        hypernodes[hp_node_id] = [e_3_idx[-1], l_3_idx[0]]
+                    elif e_5_idx[0] - 1 == l_5_idx[-1]:
+                        hypernodes[hp_node_id] = [l_5_idx[-1], e_5_idx[0]]
+                    elif e_5_idx[-1] + 1 == l_3_idx[0]:
+                        # this one is on the external region
+                        # alternate criterion: max(e_5_idx) < max(l_5_idx)
+                        hypernodes[hp_node_id] = [e_5_idx[-1], l_3_idx[0]]
+                    else:
+                        raise ValueError('Multiloop parsing error:%s\n%s' % (hp_node_id, dotbracket_struct))
                 else:
                     hypernodes[hp_node_id] = list(range(int(tokens[1]) - 2, int(tokens[2]) + 1))
 
@@ -120,10 +138,15 @@ def decompose(dotbracket_struct):
         hpn_neighbors[i] = list(sorted(set(hpn_neighbors[i])))
 
     nb_mloop = len(list(bg.mloop_iterator()))
-    merged_mloops = []
-
+    external_region_ids = []
+    # Merging multiloop segments
     for mloops in bg.junctions:
         mloop_checker = list(map(lambda x: x.upper().startswith('M'), mloops))
+        external_checker = list(map(lambda x: x.upper().startswith('F') or x.upper().startswith('T'), mloops))
+
+        if sum(mloop_checker) <= 2 or sum(external_checker) >= 1:
+            external_region_ids.extend([loop_id.upper() for loop_id in mloops])
+
         if sum(mloop_checker) > 2:
             all_nuc_idx = []
             all_neighbors_idx = []
@@ -131,7 +154,8 @@ def decompose(dotbracket_struct):
                 mloop_id = mloop_id.upper()
                 # nucleotide indices assigned to a multiloop segment
                 # note: do not remove anything from the dict or the list
-                all_nuc_idx += hypernodes[mloop_id]
+                # all_nuc_idx += hypernodes[mloop_id]
+                all_nuc_idx.append(hypernodes[mloop_id])
 
                 # gather neighbors of that multiloop segment
                 mloop_idx = all_hpn_ids.index(mloop_id)
@@ -140,13 +164,98 @@ def decompose(dotbracket_struct):
                     hpn_neighbors[mloop_nei_idx].remove(mloop_idx)
                 hpn_neighbors[mloop_idx] = []
 
-            all_nuc_idx = list(sorted(set(all_nuc_idx)))
+            # all_nuc_idx = list(sorted(set(all_nuc_idx)))
             all_neighbors_idx = list(sorted(set(all_neighbors_idx)))
-            merged_mloops.append('M%d' % (nb_mloop))
-            hypernodes[merged_mloops[-1]] = all_nuc_idx
+            hypernodes['M%d' % (nb_mloop)] = all_nuc_idx
+            nb_mloop += 1
             hpn_neighbors.append(all_neighbors_idx)
             for neighbor_idx in all_neighbors_idx:
                 hpn_neighbors[neighbor_idx] += [len(hpn_neighbors) - 1]
+
+    if len(all_hpn_ids) == 1 and all_hpn_ids[0] == 'F0':
+        # replace with hairpin...
+        hypernodes['H'] = list(range(len(dotbracket_struct)))
+        hpn_neighbors.append([2])
+        hypernodes['P'] = [[0], [len(dotbracket_struct) - 1]]
+        hpn_neighbors.append([1])
+    else:
+        # Introducing a pseudo root node
+        # Note: the root node shall not start with a stem
+        if len(external_region_ids) == 0:
+            if 'F0' in hypernodes:
+                external_region_ids.append('F0')
+            if 'T0' in hypernodes:
+                external_region_ids.append('T0')
+
+        external_idx = []
+        ext_loop_checker = list(map(lambda x: x.startswith('M'), external_region_ids))
+        ext_dangling_checker = list(map(lambda x: x.startswith('F') or x.startswith('T'), external_region_ids))
+        if sum(ext_loop_checker) == 0:
+            # no external loops
+            first_stem_idx = all_hpn_ids.index('S0')
+            if sum(ext_dangling_checker) == 0:
+                # attach pseudo node directly to the first stem of this RNA
+                hypernodes['P'] = [[0], [len(dotbracket_struct) - 1]]
+                hpn_neighbors.append([first_stem_idx])
+                hpn_neighbors[first_stem_idx] += [len(hpn_neighbors) - 1]
+            else:
+                # insert an internal loop between the stem and the pseudo start node
+                nb_iloop = len(list(bg.iloop_iterator()))
+
+                if 'F0' in external_region_ids:
+                    dangling_start_idx = all_hpn_ids.index('F0')
+                    external_idx.append(hypernodes['F0'])
+                    hpn_neighbors[dangling_start_idx] = []
+                    hpn_neighbors[first_stem_idx].remove(dangling_start_idx)
+                else:
+                    external_idx.append([0])
+
+                if 'T0' in external_region_ids:
+                    dangling_end_idx = all_hpn_ids.index('T0')
+                    external_idx.append(hypernodes['T0'])
+                    hpn_neighbors[dangling_end_idx] = []
+                    hpn_neighbors[first_stem_idx].remove(dangling_end_idx)
+                else:
+                    external_idx.append([len(dotbracket_struct) - 1])
+
+                hypernodes['I%d'%(nb_iloop)] = external_idx
+                hpn_neighbors.append([first_stem_idx])
+                attached_iloop_idx = len(hpn_neighbors) - 1
+                hpn_neighbors[first_stem_idx] += [attached_iloop_idx]
+
+                # now attach pseudo-node
+                hypernodes['P'] = [[0], [len(dotbracket_struct) - 1]]
+                hpn_neighbors.append([attached_iloop_idx])
+                hpn_neighbors[attached_iloop_idx] += [len(hpn_neighbors) - 1]
+        else:
+            all_neighbors_idx = []
+            if 'F0' not in external_region_ids:
+                external_idx.append([0])
+
+            for ext_id in external_region_ids:
+                external_idx.append(hypernodes[ext_id])
+
+                # gather neighbors of that multiloop segment
+                ext_idx = all_hpn_ids.index(ext_id)
+                all_neighbors_idx += hpn_neighbors[ext_idx]
+                for ext_nei_idx in hpn_neighbors[ext_idx]:
+                    hpn_neighbors[ext_nei_idx].remove(ext_idx)
+                hpn_neighbors[ext_idx] = []
+
+            if 'T0' not in external_region_ids:
+                external_idx.append([len(dotbracket_struct) - 1])
+
+            all_neighbors_idx = list(sorted(set(all_neighbors_idx)))
+            hypernodes['M%d' % (nb_mloop)] = external_idx
+            nb_mloop += 1
+            hpn_neighbors.append(all_neighbors_idx)
+            for neighbor_idx in all_neighbors_idx:
+                hpn_neighbors[neighbor_idx] += [len(hpn_neighbors) - 1]
+            attcached_mloop = len(hpn_neighbors) - 1
+            # now attach pseudo-node
+            hypernodes['P'] = [[0], [len(dotbracket_struct) - 1]]
+            hpn_neighbors.append([attcached_mloop])
+            hpn_neighbors[attcached_mloop] += [len(hpn_neighbors) - 1]
 
     all_hpn_ids = np.array(list(hypernodes.keys()))
     # breadth first search to find the spanning tree
@@ -163,7 +272,7 @@ def decompose(dotbracket_struct):
     # junction_tree = ((junction_tree + junction_tree.T) > 0).astype(np.int32)
     # print(np.sum(clique_graph - junction_tree))
 
-    breadth_first_order = sp.csgraph.breadth_first_order(clique_graph, i_start=0, directed=False,
+    breadth_first_order = sp.csgraph.breadth_first_order(clique_graph, i_start=len(all_hpn_ids) - 1, directed=False,
                                                          return_predecessors=False)
     junction_tree = clique_graph[breadth_first_order, :][:, breadth_first_order]
     hpn_id = [hid[0] for hid in all_hpn_ids[breadth_first_order]]
@@ -175,15 +284,10 @@ def decompose(dotbracket_struct):
 if __name__ == "__main__":
     np.set_printoptions(threshold=np.inf, edgeitems=30, linewidth=100000, )
 
-    decompose('(((((.(((..(((((....((....))....))))).......((((.............))))....))).))))).((((...(((.(((.......))))))..(((((....)))))))))..')
-
-    exit()
-
     adjmat, node_labels, hpn_nodes_assignment = decompose(
         "....((((((....((.......((((.((((.(((...(((((..........)))))...((.......))....)))......))))))))......))...)).))))......(((....((((((((...))))))))...)))........")
     print(adjmat.todense())
     print(list(zip(node_labels, hpn_nodes_assignment)))
-    exit()
     node_labels = np.array(node_labels).astype('<U15')
     node_labels[node_labels == 'S'] = "Stem"
     node_labels[node_labels == 'F'] = "Dangling Start"

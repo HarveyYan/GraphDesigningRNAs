@@ -7,11 +7,7 @@ from lib.tree_decomp import RNAJunctionTree
 from tqdm import tqdm
 
 def preprocess(args):
-    try:
-        obj = RNAJunctionTree(*args)
-    except IndexError:
-        # print(args)
-        return []
+    obj = RNAJunctionTree(*args)
     return obj
 
 if __name__ == "__main__":
@@ -22,14 +18,13 @@ if __name__ == "__main__":
 
     file = pd.read_csv('data/rna_dataset_128.csv')
 
-    # all_rna_jt = []
+    # from lib.tree_decomp import decompose
     # for seq, struct in zip(file['seq'], file['struct']):
-    #     all_rna_jt.append(preprocess((seq, struct)))
+    #     print(struct)
+    #     decompose(struct)
 
     pool = mp.Pool(8)
     all_rna_jt = list(tqdm(pool.map(preprocess, zip(file['seq'], file['struct']))))
-    while [] in all_rna_jt:
-        all_rna_jt.remove([])
 
     if not os.path.exists('./data/rna_jt'):
         os.makedirs('./data/rna_jt')
