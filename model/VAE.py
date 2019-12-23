@@ -4,7 +4,7 @@ import torch.nn as nn
 from model.GraphEncoder import GraphEncoder
 from model.TreeEncoder import TreeEncoder
 from model.TreeDecoder import TreeDecoder
-from model.GraphDecoder import GraphDecoder
+# from model.GraphDecoder import GraphDecoder
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -27,7 +27,7 @@ class JunctionTreeVAE(nn.Module):
         self.t_var = nn.Linear(hidden_dim, latent_dim)
 
         self.t_decoder = TreeDecoder(hidden_dim, latent_dim)
-        self.g_decoder = GraphDecoder(hidden_dim, latent_dim)
+        # self.g_decoder = GraphDecoder(hidden_dim, latent_dim)
 
 
     def encode(self, g_encoder_input, t_encoder_input):
@@ -58,7 +58,7 @@ class JunctionTreeVAE(nn.Module):
         word_loss, topology_loss, word_acc, topology_acc, tree_messages, tree_traces = \
             self.t_decoder(tree_batch, tree_latent_vec)
 
-        self.g_decoder(tree_batch, tree_messages, tree_traces)
+        # self.g_decoder(tree_batch, tree_messages, tree_traces)
 
 
         return word_loss + topology_loss + beta * all_kl_loss, all_kl_loss, word_acc, topology_acc
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     loader = JunctionTreeFolder('../data/rna_jt', 32, num_workers=0)
     for batch in loader:
         tree_batch, graph_encoder_input, tree_encoder_input = batch
-        all_loss, word_acc, topology_acc = test_model(batch, 1.)
+        all_loss, kl_loss, word_acc, topology_acc = test_model(batch, 1.)
         print(word_acc)
         print(topology_acc)
         print('=' * 30)

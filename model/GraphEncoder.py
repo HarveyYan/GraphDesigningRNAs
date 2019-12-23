@@ -55,7 +55,7 @@ class GraphEncoder(nn.Module):
         nuc_nb_msg = index_select_ND(messages, 0, node_graph).sum(dim=1)
         nuc_embedding = F.relu(self.w_node_emb(torch.cat([f_nuc, nuc_nb_msg], dim=1)))
 
-        # average pooling as the global averaging pooling scheme
+        # global averaging pooling to obtain the graph level embedding
         batch_rna_vec = []
         for start_idx, length in scope:
             batch_rna_vec.append(nuc_embedding[start_idx: start_idx + length].mean(dim=0))

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 
 NUC_VOCAB = ['A', 'C', 'G', 'U']
-HYPERGRAPH_VOCAB = ['F', 'T', 'H', 'I', 'M', 'S']
+HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S', 'P']
 
 MAX_NB = 10
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -81,7 +81,7 @@ class TreeDecoder(nn.Module):
         return V_o(output_vec)
 
     def forward(self, rna_tree_batch, tree_latent_vec):
-        # this is the training procedure which requires teacher forcing
+        # the training procedure which requires teacher forcing
         # actual inference procedure is implemented separately in a decode function
 
         # hypernode label prediction --> label of the hypergraph node

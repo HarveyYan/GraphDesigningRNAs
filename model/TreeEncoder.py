@@ -6,8 +6,9 @@ import numpy as np
 import torch.nn.functional as F
 from lib.nnutils import index_select_ND
 
-HYPERGRAPH_VOCAB = ['F', 'T', 'H', 'I', 'M', 'S']
-HPN_FDIM = 6
+HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S', 'P']
+# there ain't no F/T anymore
+HPN_FDIM = len(['H', 'I', 'M', 'S', 'P'])
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -68,7 +69,8 @@ class TreeEncoder(nn.Module):
                     nt_idx_assignment = node.nt_idx_assignment
                 else:
                     nt_idx_assignment = node.nt_idx_assignment.tolist()
-                # todo, the nucleotides embddings inside a subgraph are simply averaged
+                # the nucleotides embddings inside a subgraph are simply averaged
+                # todo better pooling tactics
                 if type(nt_idx_assignment[0]) is int:
                     f_node_assignment.append([nt_idx + graph_nuc_offset for nt_idx in nt_idx_assignment])
                 else:
