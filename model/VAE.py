@@ -3,10 +3,10 @@ import torch.nn as nn
 
 from model.GraphEncoder import GraphEncoder
 from model.TreeEncoder import TreeEncoder
-from model.TreeDecoder import TreeDecoder
-# from model.GraphDecoder import GraphDecoder
+# from model.TreeDecoder import TreeDecoder
+from model.Decoder import UnifiedDecoder
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if False else 'cpu')
 
 
 class JunctionTreeVAE(nn.Module):
@@ -26,7 +26,7 @@ class JunctionTreeVAE(nn.Module):
         self.t_mean = nn.Linear(hidden_dim, latent_dim)
         self.t_var = nn.Linear(hidden_dim, latent_dim)
 
-        self.t_decoder = TreeDecoder(hidden_dim, latent_dim)
+        self.decoder = UnifiedDecoder(hidden_dim, latent_dim)
         # self.g_decoder = GraphDecoder(hidden_dim, latent_dim)
 
 
@@ -55,23 +55,19 @@ class JunctionTreeVAE(nn.Module):
 
         # when training the decoders it is imperative to use teacher forcing,
         # i.e. feeding the ground truth topology and subgraph conformation
-        word_loss, topology_loss, word_acc, topology_acc, tree_messages, tree_traces = \
-            self.t_decoder(tree_batch, tree_latent_vec)
+        all_loss, all_acc, tree_messages, tree_traces = \
+            self.decoder(tree_batch, tree_latent_vec, graph_latent_vec)
 
-        # self.g_decoder(tree_batch, tree_messages, tree_traces)
-
-
-        return word_loss + topology_loss + beta * all_kl_loss, all_kl_loss, word_acc, topology_acc
+        return sum(all_loss) + beta * all_kl_loss, all_kl_loss, all_acc
 
 
 if __name__ == "__main__":
-    test_model = JunctionTreeVAE(50, 10, 10, 20).to(device)
+    test_model = JunctionTreeVAE(30, 30, 10, 20).to(device)
     from lib.data_utils import JunctionTreeFolder
 
     loader = JunctionTreeFolder('../data/rna_jt', 32, num_workers=0)
     for batch in loader:
         tree_batch, graph_encoder_input, tree_encoder_input = batch
-        all_loss, kl_loss, word_acc, topology_acc = test_model(batch, 1.)
-        print(word_acc)
-        print(topology_acc)
+        all_loss, kl_loss, all_acc = test_model(batch, 1.)
+        print(all_acc)
         print('=' * 30)

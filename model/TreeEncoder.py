@@ -6,9 +6,10 @@ import numpy as np
 import torch.nn.functional as F
 from lib.nnutils import index_select_ND
 
-HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S', 'P']
+HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 # there ain't no F/T anymore
-HPN_FDIM = len(['H', 'I', 'M', 'S', 'P'])
+# there is no need to encode/decode the pseudo start node
+HPN_FDIM = len(['H', 'I', 'M', 'S'])
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -35,7 +36,7 @@ class TreeEncoder(nn.Module):
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
         messages = torch.zeros(message_graph.size(0), self.hidden_size).to(device)
-        f_message = index_select_ND(f_node, 0, f_message)  # [nb_msg, nb_neighbors, hidden_size+6]
+        f_message = index_select_ND(f_node, 0, f_message)  # [nb_msg, nb_neighbors, hidden_size+4]
         messages = self.GRU(messages, f_message, message_graph)
 
         incoming_msg = index_select_ND(messages, 0, node_graph).sum(1)
@@ -43,9 +44,10 @@ class TreeEncoder(nn.Module):
 
         batch_hpn_vec = []
         for start_idx, length in scope:
+            # skip the first pseudo node
             # only the root vector is kept
             # todo, does including other nodes really confuse the decoding stage?
-            batch_hpn_vec.append(hpn_embedding[start_idx])
+            batch_hpn_vec.append(hpn_embedding[start_idx + 1])
 
         return messages, torch.stack(batch_hpn_vec)
 
@@ -69,16 +71,19 @@ class TreeEncoder(nn.Module):
                     nt_idx_assignment = node.nt_idx_assignment
                 else:
                     nt_idx_assignment = node.nt_idx_assignment.tolist()
-                # the nucleotides embddings inside a subgraph are simply averaged
+                # the nucleotides embeddings inside a subgraph are simply averaged
                 # todo better pooling tactics
                 if type(nt_idx_assignment[0]) is int:
                     f_node_assignment.append([nt_idx + graph_nuc_offset for nt_idx in nt_idx_assignment])
                 else:
                     f_node_assignment.append(list(np.concatenate(nt_idx_assignment, axis=0) + graph_nuc_offset))
 
-                for neighbor_node in node.neighbors:
-                    message_dict[(node.idx + tree_node_offset, neighbor_node.idx + tree_node_offset)] = len(messages)
-                    messages.append((node, neighbor_node, tree_node_offset))
+                if node.hpn_label != 'P':
+                    for neighbor_node in node.neighbors:
+                        if neighbor_node.hpn_label == 'P':  # skip the pseudo start node
+                            continue
+                        message_dict[(node.idx + tree_node_offset, neighbor_node.idx + tree_node_offset)] = len(messages)
+                        messages.append((node, neighbor_node, tree_node_offset))
 
             scope.append([tree_node_offset, len(tree.nodes)])
             tree_node_offset += len(tree.nodes)
@@ -97,7 +102,7 @@ class TreeEncoder(nn.Module):
             # message passed from node_from to node_to
             node_graph[node_to.idx + tree_node_offset].append(msg_idx)
             for neighbor_node in node_to.neighbors:
-                if neighbor_node.idx == node_from.idx:
+                if neighbor_node.idx == node_from.idx or neighbor_node.hpn_label == 'P':
                     continue
                 else:
                     necessary_msg_idx = message_dict[

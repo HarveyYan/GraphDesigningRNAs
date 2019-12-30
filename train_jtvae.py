@@ -65,12 +65,12 @@ beta = args.beta
 meters = np.zeros(3)
 
 for epoch in range(args.epoch):
-    loader = JunctionTreeFolder('data/rna_jt', args.batch_size, num_workers=4)
+    loader = JunctionTreeFolder('data/rna_jt', args.batch_size, num_workers=8)
     for batch in loader:
         total_step += 1
         try:
             model.zero_grad()
-            loss, kl_div, wacc, tacc = model(batch, beta)
+            loss, kl_div, all_acc = model(batch, beta)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
             optimizer.step()
@@ -78,14 +78,15 @@ for epoch in range(args.epoch):
             print(e)
             continue
 
-        meters = meters + np.array([kl_div, wacc * 100, tacc * 100])
+        meters = meters + np.array([kl_div, all_acc[0] * 100, all_acc[1] * 100, all_acc[2] * 100])
 
         if total_step % args.print_iter == 0:
             meters /= args.print_iter
-            print("[%d] Beta: %.3f, KL: %.2f, Word: %.2f, Topo: %.2f, PNorm: %.2f, GNorm: %.2f" % (
-            total_step, beta, meters[0], meters[1], meters[2], param_norm(model), grad_norm(model)))
-            lib.plot.plot('word acc', meters[1])
-            lib.plot.plot('topo acc', meters[2])
+            print("[%d] Beta: %.3f, KL: %.2f, Node: %.2f, Nucleotide: %.2f, Topo: %.2f, PNorm: %.2f, GNorm: %.2f" % (
+            total_step, beta, meters[0], meters[1], meters[2], meters[3], param_norm(model), grad_norm(model)))
+            lib.plot.plot('node acc', meters[1])
+            lib.plot.plot('nucleotide acc', meters[2])
+            lib.plot.plot('topo acc', meters[3])
             lib.plot.flush()
             sys.stdout.flush()
             meters *= 0

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 
 NUC_VOCAB = ['A', 'C', 'G', 'U']
-HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S', 'P']
+HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 
 MAX_NB = 10
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -93,7 +93,7 @@ class TreeDecoder(nn.Module):
         traces = []
         for tree in rna_tree_batch:
             s = []
-            dfs(s, tree.nodes[0], -1)
+            dfs(s, tree.nodes[1], 0)  # starting from the first non pseudo node
             traces.append(s)
             for node in tree.nodes:
                 node.neighbors = []
@@ -103,12 +103,12 @@ class TreeDecoder(nn.Module):
         # start token of the decoding procedure, which is usually an empty vector
         pred_hiddens.append(torch.zeros(batch_size, self.hidden_size).to(device))
         # the first hypergraph node, which is usually a dangling start
-        pred_targets.extend([HYPERGRAPH_VOCAB.index(tree.nodes[0].hpn_label) for tree in rna_tree_batch])
+        pred_targets.extend([HYPERGRAPH_VOCAB.index(tree.nodes[1].hpn_label) for tree in rna_tree_batch])
         pred_contexts.append(torch.as_tensor(
             np.array(list(range(batch_size)), dtype=np.long)).to(device))
 
-        depth_tree_batch = [len(tr) for tr in traces]
-        max_iter = max(depth_tree_batch)
+        depth_tree_batch = [len(tree.nodes) for tree in rna_tree_batch]
+        max_iter = max([len(tr) for tr in traces])
         padding = torch.zeros(self.hidden_size).to(device)
         h = {}
 
@@ -197,7 +197,7 @@ class TreeDecoder(nn.Module):
         cur_x, cur_o_nei = [], []
         for batch_idx, tree in enumerate(rna_tree_batch):
             offset = sum(depth_tree_batch[:batch_idx])
-            node_x = tree.nodes[0]
+            node_x = tree.nodes[1]
             onehot_enc = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
             cur_x.append(torch.as_tensor(onehot_enc).to(device))
             cur_nei = [h[(node_y.idx + offset, node_x.idx + offset)] for node_y in node_x.neighbors]

@@ -1,15 +1,17 @@
-# This model attempts to unify tree decoder with graph decoder
+# This model simultaneously decodes the junction tree
+# as well as the nucleotides associated within each subgraph
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-NUC_VOCAB = ['A', 'C', 'G', 'U']
-HYPERGRAPH_VOCAB = ['F', 'T', 'H', 'I', 'M', 'S']
+# '<' to signal stop translation
+NUC_VOCAB = ['A', 'C', 'G', 'U', '<']
+HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 
 MAX_NB = 10
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if False else 'cpu')
 
 
 def dfs(stack, x, fa_idx):
@@ -21,21 +23,16 @@ def dfs(stack, x, fa_idx):
         stack.append((y, x, 0))
 
 
-def GRU(x, h_nei, W_z, W_r, U_r, W_h):
-    # h_nei are the messages passed from existing neighbors
-    sum_h = h_nei.sum(dim=1)
-    z_input = torch.cat([x, sum_h], dim=1)
+def GRU(x, h, W_z, W_r, W_h):
+    # a normal GRU cell
+
+    z_input = r_input = torch.cat([x, h], dim=1)
     z = F.sigmoid(W_z(z_input))
-
-    r_1 = W_r(x)[:, None, :]
-    r_2 = U_r(h_nei)
-    r = F.sigmoid(r_1 + r_2)
-
-    gated_h = r * h_nei
-    sum_gated_h = gated_h.sum(dim=1)
-    h_input = torch.cat([x, sum_gated_h], dim=1)
+    r = F.sigmoid(W_r(r_input))
+    gated_h = r * h
+    h_input = torch.cat([x, gated_h], dim=1)
     pre_h = F.tanh(W_h(h_input))
-    new_h = (1.0 - z) * sum_h + z * pre_h
+    new_h = (1.0 - z) * h + z * pre_h
     return new_h
 
 
@@ -46,72 +43,88 @@ class UnifiedDecoder(nn.Module):
         self.hidden_size = hidden_size
         self.latent_size = latent_size
 
-        # GRU Weights
-        self.W_z = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
-        self.U_r = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.W_r = nn.Linear(len(HYPERGRAPH_VOCAB), hidden_size)
-        self.W_h = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
+        # GRU Weights for message passing
+        # self.W_z_mp = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
+        # self.U_r_mp = nn.Linear(hidden_size, hidden_size, bias=False)
+        # self.W_r_mp = nn.Linear(len(HYPERGRAPH_VOCAB), hidden_size)
+        # self.W_h_mp = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
 
-        # Word Prediction Weights
-        self.W = nn.Linear(hidden_size + latent_size, hidden_size)
+        # GRU Weights for nucleotide decoding
+        self.W_z_nuc = nn.Linear(hidden_size + len(NUC_VOCAB), hidden_size)
+        self.W_r_nuc = nn.Linear(hidden_size + len(NUC_VOCAB), hidden_size)
+        self.W_h_nuc = nn.Linear(hidden_size + len(NUC_VOCAB), hidden_size)
 
-        # Stop Prediction Weights
-        self.U = nn.Linear(hidden_size + latent_size, hidden_size)
-        self.U_i = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
+        # hypernode label prediction
+        self.W_hpn = nn.Linear(hidden_size, len(HYPERGRAPH_VOCAB))
+        self.W_hpn_nonlinear = nn.Linear(hidden_size, hidden_size)
 
-        # Output Weights
-        self.W_o = nn.Linear(hidden_size, len(HYPERGRAPH_VOCAB))
-        self.U_o = nn.Linear(hidden_size, 1)
+        # nucleotide prediction
+        self.W_nuc = nn.Linear(hidden_size, len(NUC_VOCAB))
+        self.W_nuc_nonlinear = nn.Linear(hidden_size + latent_size, hidden_size)
+
+        # topological prediction
+        self.W_topo = nn.Linear(hidden_size, 1)
+        self.W_topo_nonlinear = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
 
         # Loss Functions
-        self.pred_loss = nn.CrossEntropyLoss(reduction='sum')
+        self.hpn_pred_loss = nn.CrossEntropyLoss(reduction='sum')
+        self.nuc_pred_loss = nn.CrossEntropyLoss(reduction='sum')
         self.stop_loss = nn.BCEWithLogitsLoss(reduction='sum')
 
-    def aggregate(self, hiddens, contexts, x_tree_vecs, mode):
-        if mode == 'word':
-            V, V_o = self.W, self.W_o
+    def aggregate(self, hiddens, mode):
+        # topological predictions: stop
+        # hypernode label prediction: word_hpn
+        # subgraph nucleotide preidiction: word_nuc
+        if mode == 'word_hpn':
+            return self.W_hpn(F.relu(self.W_hpn_nonlinear(hiddens)))
+        elif mode == 'word_nuc':
+            return self.W_nuc(F.relu(self.W_nuc_nonlinear(hiddens)))
         elif mode == 'stop':
-            V, V_o = self.U, self.U_o
+            return self.W_topo(F.relu(self.W_topo_nonlinear(hiddens)))
         else:
             raise ValueError('aggregate mode is wrong')
 
-        tree_contexts = x_tree_vecs.index_select(0, contexts)
-        input_vec = torch.cat([hiddens, tree_contexts], dim=-1)
-        output_vec = F.relu(V(input_vec))
-        return V_o(output_vec)
-
-    def forward(self, rna_tree_batch, tree_latent_vec):
-        # this is the training procedure which requires teacher forcing
+    def forward(self, rna_tree_batch, tree_latent_vec, graph_latent_vec):
+        # the training procedure which requires teacher forcing
         # actual inference procedure is implemented separately in a decode function
 
         # hypernode label prediction --> label of the hypergraph node
-        pred_hiddens, pred_contexts, pred_targets = [], [], []
+        hpn_pred_hiddens, hpn_pred_targets = [], []
+        # nucleotide label prediction
+        nuc_pred_hiddens, nuc_pred_targets = [], []
         # topological prediction --> whether or not a clique has more children
-        stop_hiddens, stop_contexts, stop_targets = [], [], []
+        stop_hiddens, stop_targets = [], []
 
         # gather all messages from the ground truth structure
         traces = []
         for tree in rna_tree_batch:
             s = []
-            dfs(s, tree.nodes[0], -1)
+            dfs(s, tree.nodes[1], 0)  # skipping the pseudo node
             traces.append(s)
             for node in tree.nodes:
-                node.neighbors = []
+                if node.idx == 1:
+                    # to ensure the first non pseudo node receives an incoming message
+                    node.neighbors = [tree.nodes[0]]
+                else:
+                    node.neighbors = []
 
         # predict root node label
         batch_size = len(rna_tree_batch)
-        # start token of the decoding procedure, which is usually an empty vector
-        pred_hiddens.append(torch.zeros(batch_size, self.hidden_size).to(device))
-        # the first hypergraph node, which is usually a dangling start
-        pred_targets.extend([HYPERGRAPH_VOCAB.index(tree.nodes[0].hpn_label) for tree in rna_tree_batch])
-        pred_contexts.append(torch.as_tensor(
-            np.array(list(range(batch_size)), dtype=np.long)).to(device))
+        hpn_pred_hiddens.append(
+            torch.cat([tree_latent_vec, torch.zeros(batch_size, self.hidden_size - self.latent_size).to(device)],
+                      dim=1))
+        hpn_pred_targets.extend([HYPERGRAPH_VOCAB.index(tree.nodes[1].hpn_label) for tree in rna_tree_batch])
 
-        depth_tree_batch = [len(tr) for tr in traces]
-        max_iter = max(depth_tree_batch)
+        depth_tree_batch = [len(tree.nodes) for tree in rna_tree_batch]
+        max_iter = max([len(tr) for tr in traces])
         padding = torch.zeros(self.hidden_size).to(device)
         h = {}
 
+        for batch_idx in range(batch_size):
+            offset = sum(depth_tree_batch[:batch_idx])
+            h[(offset, offset + 1)] = torch.cat(
+                [tree_latent_vec[batch_idx], torch.zeros(self.hidden_size - self.latent_size).to(device)])
+        print(max_iter)
         for t in range(max_iter):
 
             prop_list = []
@@ -122,42 +135,83 @@ class UnifiedDecoder(nn.Module):
                     prop_list.append(plist[t])
                     batch_list.append(i)
 
-            cur_x = []
-            cur_h_nei, cur_o_nei = [], []
+            hpn_label = []
+            node_incoming_msg = []
+            all_seq_input = []
+            all_nuc_label = []
 
             for i, (node_x, real_y, _) in enumerate(prop_list):
                 batch_idx = batch_list[i]
                 offset = sum(depth_tree_batch[:batch_idx])
 
-                # Neighbors for message passing (target not included)
-                cur_nei = [h[(node_y.idx + offset, node_x.idx + offset)] for node_y in node_x.neighbors if
-                           node_y.idx != real_y.idx]
-                pad_len = MAX_NB - len(cur_nei)
-                cur_h_nei.extend(cur_nei)
-                cur_h_nei.extend([padding] * pad_len)
+                # messages flowing into a node for topological prediction
+                incoming_msg = [h[(node_y.idx + offset, node_x.idx + offset)] for node_y in node_x.neighbors]
+                nb_effective_msg = len(incoming_msg)
+                pad_len = MAX_NB - nb_effective_msg
+                node_incoming_msg.extend(incoming_msg)
+                node_incoming_msg.extend([padding] * pad_len)
 
-                # Neighbors for stop prediction (all neighbors)
-                cur_nei = [h[(node_y.idx + offset, node_x.idx + offset)] for node_y in node_x.neighbors]
-                pad_len = MAX_NB - len(cur_nei)
-                cur_o_nei.extend(cur_nei)
-                cur_o_nei.extend([padding] * pad_len)
-
-                # teacher forcing, input to the gru should be the ground truth hypergraph tree node
+                # teacher forcing the ground truth node label
                 onehot_enc = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
-                cur_x.append(torch.as_tensor(onehot_enc).to(device))
+                hpn_label.append(onehot_enc)
 
-            cur_x = torch.stack(cur_x, dim=0)
-            # Message passing
-            cur_h_nei = torch.stack(cur_h_nei, dim=0). \
-                view(-1, MAX_NB, self.hidden_size)  # [batch_size, max_nei, hidden_size]
-            # updated messages from node x to one of its neighbor
-            new_h = GRU(cur_x, cur_h_nei, self.W_z, self.W_r, self.U_r, self.W_h)
+                # decode a segment of nucleotides in the current hypernode
+                if node_x.hpn_label != 'H':
+                    node_nt_idx = node_x.nt_idx_assignment[nb_effective_msg - 1]
+                else:
+                    node_nt_idx = node_x.nt_idx_assignment
+                if t == 0:
+                    seq_input = [np.zeros(len(NUC_VOCAB), dtype=np.float32)]  # start token
+                else:
+                    seq_input = []
+                for nuc_idx, nuc in enumerate([rna_tree_batch[batch_idx].rna_seq[nt_idx] for nt_idx in node_nt_idx]):
+                    onehot_enc = np.array(list(map(lambda x: x == nuc, NUC_VOCAB)), dtype=np.float32)
+                    seq_input.append(onehot_enc)
+                    if nuc_idx == 0 and t > 0:
+                        continue
+                    all_nuc_label.append(NUC_VOCAB.index(nuc))
+                all_nuc_label.append(NUC_VOCAB.index('<'))
+                all_seq_input.append(seq_input)
 
-            # Node Aggregate
-            cur_o_nei = torch.stack(cur_o_nei, dim=0).view(-1, MAX_NB, self.hidden_size)
-            cur_o = cur_o_nei.sum(dim=1)  # [batch_size, hidden_dim]
+            # messages for hyper node topological prediction
+            hpn_label = torch.as_tensor(np.array(hpn_label)).to(device)
+            node_incoming_msg = torch.stack(node_incoming_msg, dim=0).view(-1, MAX_NB, self.hidden_size)
+            node_incoming_msg = node_incoming_msg.sum(dim=1)  # [batch_size, hidden_dim]
 
-            # Gather targets
+            # decode a segment as well as compute a new message
+            all_len = [len(seq_input) for seq_input in all_seq_input]
+            max_len = max(all_len)
+            for seq_input in all_seq_input:
+                # paddings
+                seq_input += [np.zeros(len(NUC_VOCAB), dtype=np.float32)] * (max_len - len(seq_input))
+            all_seq_input = torch.as_tensor(np.array(all_seq_input)).to(device)
+
+            all_hidden_states = []
+            hidden_states = node_incoming_msg
+            for len_idx in range(max_len):
+                hidden_states = GRU(all_seq_input[:, len_idx, :], hidden_states,
+                                    self.W_z_nuc, self.W_r_nuc, self.W_h_nuc)
+                all_hidden_states.append(hidden_states)
+
+            all_hidden_states = torch.stack(all_hidden_states, dim=1).view(-1, self.hidden_size)
+            pre_padding_idx = (
+                        np.array(list(range(0, len(all_len) * max_len, max_len))) + np.array(all_len) - 1).astype(
+                np.long)
+            new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
+
+            pre_padding_idx = np.concatenate(
+                [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)]).astype(np.long)
+            all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
+
+            # hidden states for nucleotide reconstruction
+            batch_idx = [c for i, length in enumerate(all_len) for c in [i] * length]
+            all_hidden_states = torch.cat([
+                all_hidden_states,
+                graph_latent_vec.index_select(0, torch.as_tensor(np.array(batch_idx, dtype=np.long)).to(device))
+            ], dim=1)
+            nuc_pred_hiddens.append(all_hidden_states)
+            nuc_pred_targets.extend(all_nuc_label)
+
             pred_target, pred_list = [], []
             stop_target = []
             for i, m in enumerate(prop_list):
@@ -170,74 +224,126 @@ class UnifiedDecoder(nn.Module):
                 node_y.neighbors.append(node_x)
                 if direction == 1:
                     # direction where we are expanding (relative to backtracking)
+                    # for these we make a prediction about the expanded hypernode's label
                     pred_target.append(HYPERGRAPH_VOCAB.index(node_y.hpn_label))
                     pred_list.append(i)
                 stop_target.append(direction)
 
-            # Hidden states for stop prediction
-            cur_batch = torch.as_tensor(np.array(batch_list, dtype=np.long)).to(device)
-            stop_hidden = torch.cat([cur_x, cur_o], dim=1)
+            # hidden states for stop prediction
+            stop_hidden = torch.cat([hpn_label, node_incoming_msg], dim=1)
             stop_hiddens.append(stop_hidden)
-            stop_contexts.append(cur_batch)
             stop_targets.extend(stop_target)
 
-            # Hidden states for clique prediction
+            # hidden states for label prediction
             if len(pred_list) > 0:
-                batch_list = [batch_list[i] for i in pred_list]
                 # list where we make label predictions
-                cur_batch = torch.as_tensor(np.array(batch_list, dtype=np.long)).to(device)
-                pred_contexts.append(cur_batch)
-
                 cur_pred = torch.as_tensor(np.array(pred_list, dtype=np.long)).to(device)
-                pred_hiddens.append(new_h.index_select(0, cur_pred))
-                pred_targets.extend(pred_target)
+                hpn_pred_hiddens.append(new_h.index_select(0, cur_pred))
+                hpn_pred_targets.extend(pred_target)
 
-        # Last stop at root
-        # toplogical prediction --> no more children
-        cur_x, cur_o_nei = [], []
+        # last stop at the non pseudo root node
+        # topological prediction --> no more children
+        hpn_label, node_incoming_msg = [], []
         for batch_idx, tree in enumerate(rna_tree_batch):
             offset = sum(depth_tree_batch[:batch_idx])
-            node_x = tree.nodes[0]
+            node_x = tree.nodes[1]
             onehot_enc = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
-            cur_x.append(torch.as_tensor(onehot_enc).to(device))
-            cur_nei = [h[(node_y.idx + offset, node_x.idx + offset)] for node_y in node_x.neighbors]
-            pad_len = MAX_NB - len(cur_nei)
-            cur_o_nei.extend(cur_nei)
-            cur_o_nei.extend([padding] * pad_len)
+            hpn_label.append(torch.as_tensor(onehot_enc).to(device))
+            incoming_msg = [h[(node_y.idx + offset, node_x.idx + offset)] for node_y in node_x.neighbors]
+            nb_effective_msg = len(incoming_msg)
+            pad_len = MAX_NB - nb_effective_msg
+            node_incoming_msg.extend(incoming_msg)
+            node_incoming_msg.extend([padding] * pad_len)
 
-        cur_x = torch.stack(cur_x, dim=0)
-        cur_o_nei = torch.stack(cur_o_nei, dim=0).view(-1, MAX_NB, self.hidden_size)
-        cur_o = cur_o_nei.sum(dim=1)
+        hpn_label = torch.stack(hpn_label, dim=0)
+        node_incoming_msg = torch.stack(node_incoming_msg, dim=0).view(-1, MAX_NB, self.hidden_size)
+        node_incoming_msg = node_incoming_msg.sum(dim=1)
 
-        stop_hidden = torch.cat([cur_x, cur_o], dim=1)
+        stop_hidden = torch.cat([hpn_label, node_incoming_msg], dim=1)
         stop_hiddens.append(stop_hidden)
-        stop_contexts.append(torch.as_tensor(
-            np.array(list(range(batch_size)), dtype=np.long)).to(device))
-        stop_targets.extend([0] * len(rna_tree_batch))
+        stop_targets.extend([0] * batch_size)
 
-        # parts for building the objective function
+        # decode last segment of the non pseudo root node
+        all_seq_input = []
+        all_nuc_label = []
+        for i in range(batch_size):
+            root_node = rna_tree_batch[i].nodes[1]
+            if root_node.hpn_label != 'H':
+                root_node_nt_idx = root_node.nt_idx_assignment[-1]
+            else:
+                root_node_nt_idx = root_node.nt_idx_assignment
+            if root_node.hpn_label == 'H':
+                seq_input = [np.zeros(len(NUC_VOCAB), dtype=np.float32)]  # start token
+            else:
+                seq_input = []
+            for nuc_idx, nuc in enumerate([rna_tree_batch[i].rna_seq[nt_idx] for nt_idx in root_node_nt_idx]):
+                onehot_enc = np.array(list(map(lambda x: x == nuc, NUC_VOCAB)), dtype=np.float32)
+                seq_input.append(onehot_enc)
+                if nuc_idx == 0 and root_node.hpn_label != 'H':
+                    continue
+                all_nuc_label.append(NUC_VOCAB.index(nuc))
+            all_nuc_label.append(NUC_VOCAB.index('<'))
+            all_seq_input.append(seq_input)
+
+        # decode a segment as well as compute a new message
+        all_len = [len(seq_input) for seq_input in all_seq_input]
+        max_len = max(all_len)
+        for seq_input in all_seq_input:
+            # paddings
+            seq_input += [np.zeros(len(NUC_VOCAB), dtype=np.float32)] * (max_len - len(seq_input))
+        all_seq_input = torch.as_tensor(np.array(all_seq_input)).to(device)
+
+        all_hidden_states = []
+        hidden_states = node_incoming_msg
+        for len_idx in range(max_len):
+            hidden_states = GRU(all_seq_input[:, len_idx, :], hidden_states,
+                                self.W_z_nuc, self.W_r_nuc, self.W_h_nuc)
+            all_hidden_states.append(hidden_states)
+
+        all_hidden_states = torch.stack(all_hidden_states, dim=1).view(-1, self.hidden_size)
+        pre_padding_idx = np.concatenate(
+            [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)])
+        all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
+
+        # hidden states for nucleotide reconstruction
+        batch_idx = [c for i, length in enumerate(all_len) for c in [i] * length]
+        all_hidden_states = torch.cat([
+            all_hidden_states,
+            graph_latent_vec.index_select(0, torch.as_tensor(np.array(batch_idx, dtype=np.long)).to(device))
+        ], dim=1)
+        nuc_pred_hiddens.append(all_hidden_states)
+        nuc_pred_targets.extend(all_nuc_label)
+
+        '''building objective functions'''
+
         # Predict next clique
-        pred_contexts = torch.cat(pred_contexts, dim=0)
-        pred_hiddens = torch.cat(pred_hiddens, dim=0)
-        pred_scores = self.aggregate(pred_hiddens, pred_contexts, tree_latent_vec, 'word')
-        pred_targets = torch.as_tensor(np.array(pred_targets, dtype=np.long)).to(device)
+        hpn_pred_hiddens = torch.cat(hpn_pred_hiddens, dim=0)
+        hpn_pred_scores = self.aggregate(hpn_pred_hiddens, 'word_hpn')
+        hpn_pred_targets = torch.as_tensor(np.array(hpn_pred_targets, dtype=np.long)).to(device)
+        hpn_pred_loss = self.hpn_pred_loss(hpn_pred_scores, hpn_pred_targets) / len(rna_tree_batch)
+        _, hpn_preds = torch.max(hpn_pred_scores, dim=1)
+        hpn_pred_acc = torch.eq(hpn_preds, hpn_pred_targets).float()
+        hpn_pred_acc = torch.sum(hpn_pred_acc) / hpn_pred_targets.nelement()
 
-        pred_loss = self.pred_loss(pred_scores, pred_targets) / len(rna_tree_batch)
-        _, preds = torch.max(pred_scores, dim=1)
-        pred_acc = torch.eq(preds, pred_targets).float()
-        pred_acc = torch.sum(pred_acc) / pred_targets.nelement()
+        # Predict nucleotides
+        nuc_pred_hiddens = torch.cat(nuc_pred_hiddens, dim=0)
+        nuc_pred_scores = self.aggregate(nuc_pred_hiddens, 'word_nuc')
+        nuc_pred_targets = torch.as_tensor(np.array(nuc_pred_targets, dtype=np.long)).to(device)
+        nuc_pred_loss = self.nuc_pred_loss(nuc_pred_scores, nuc_pred_targets) / len(rna_tree_batch)
+        _, nuc_preds = torch.max(nuc_pred_scores, dim=1)
+        nuc_pred_acc = torch.eq(nuc_preds, nuc_pred_targets).float()
+        nuc_pred_acc = torch.sum(nuc_pred_acc) / nuc_pred_targets.nelement()
 
         # Predict stop
-        stop_contexts = torch.cat(stop_contexts, dim=0)
         stop_hiddens = torch.cat(stop_hiddens, dim=0)
-        stop_hiddens = F.relu(self.U_i(stop_hiddens))
-        stop_scores = self.aggregate(stop_hiddens, stop_contexts, tree_latent_vec, 'stop')
+        stop_scores = self.aggregate(stop_hiddens, 'stop')
         stop_scores = stop_scores.squeeze(-1)
         stop_targets = torch.as_tensor(np.array(stop_targets, dtype=np.float32)).to(device)
-
         stop_loss = self.stop_loss(stop_scores, stop_targets) / len(rna_tree_batch)
         stops = torch.ge(stop_scores, 0).float()
         stop_acc = torch.eq(stops, stop_targets).float()
         stop_acc = torch.sum(stop_acc) / stop_targets.nelement()
 
-        return pred_loss, stop_loss, pred_acc.item(), stop_acc.item()
+        return (hpn_pred_loss, nuc_pred_loss, stop_loss), \
+               (hpn_pred_acc.item(), nuc_pred_acc.item(), stop_acc.item()), \
+               h, traces
