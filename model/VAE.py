@@ -6,7 +6,7 @@ from model.TreeEncoder import TreeEncoder
 # from model.TreeDecoder import TreeDecoder
 from model.Decoder import UnifiedDecoder
 
-device = torch.device('cuda:0' if False else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 class JunctionTreeVAE(nn.Module):

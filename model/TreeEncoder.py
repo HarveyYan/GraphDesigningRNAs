@@ -40,7 +40,7 @@ class TreeEncoder(nn.Module):
         messages = self.GRU(messages, f_message, message_graph)
 
         incoming_msg = index_select_ND(messages, 0, node_graph).sum(1)
-        hpn_embedding = F.relu(self.output_w(torch.cat([f_node, incoming_msg], dim=-1)))
+        hpn_embedding = torch.relu(self.output_w(torch.cat([f_node, incoming_msg], dim=-1)))
 
         batch_hpn_vec = []
         for start_idx, length in scope:
@@ -155,16 +155,16 @@ class GraphGRU(nn.Module):
             # [nb_msg, nb_neighbors, hidden_dim]
             sum_msg = msg_nei.sum(dim=1)
             z_input = torch.cat([local_field, sum_msg], dim=1)
-            z = F.sigmoid(self.W_z(z_input))
+            z = torch.sigmoid(self.W_z(z_input))
 
             r_1 = self.W_r(local_field).view(-1, 1, self.hidden_size)
             r_2 = self.U_r(msg_nei)
-            r = F.sigmoid(r_1 + r_2)
+            r = torch.sigmoid(r_1 + r_2)
 
             gated_msg = r * msg_nei
             sum_gated_msg = gated_msg.sum(dim=1)
             msg_input = torch.cat([local_field, sum_gated_msg], dim=1)
-            pre_msg = F.tanh(self.W_h(msg_input))
+            pre_msg = torch.tanh(self.W_h(msg_input))
             messages = (1.0 - z) * sum_msg + z * pre_msg
             messages = messages * mask
 

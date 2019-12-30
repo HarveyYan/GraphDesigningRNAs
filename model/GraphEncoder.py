@@ -44,16 +44,16 @@ class GraphEncoder(nn.Module):
             send_to_device(f_nuc, f_bond, node_graph, message_graph)
         local_potentials = self.w_local(f_bond)
         # messages from the first iteration
-        messages = F.relu(local_potentials)
+        messages = torch.relu(local_potentials)
 
         for i in range(1, self.depth):
             nei_message = index_select_ND(messages, 0, message_graph)
             sum_nei_message = nei_message.sum(dim=1)
             nb_clique_msg_prop = self.w_msg(sum_nei_message)
-            messages = F.relu(local_potentials + nb_clique_msg_prop)
+            messages = torch.relu(local_potentials + nb_clique_msg_prop)
 
         nuc_nb_msg = index_select_ND(messages, 0, node_graph).sum(dim=1)
-        nuc_embedding = F.relu(self.w_node_emb(torch.cat([f_nuc, nuc_nb_msg], dim=1)))
+        nuc_embedding = torch.relu(self.w_node_emb(torch.cat([f_nuc, nuc_nb_msg], dim=1)))
 
         # global averaging pooling to obtain the graph level embedding
         batch_rna_vec = []

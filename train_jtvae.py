@@ -62,21 +62,17 @@ grad_norm = lambda m: math.sqrt(sum([p.grad.norm().item() ** 2 for p in m.parame
 
 total_step = 0
 beta = args.beta
-meters = np.zeros(3)
+meters = np.zeros(4)
 
 for epoch in range(args.epoch):
     loader = JunctionTreeFolder('data/rna_jt', args.batch_size, num_workers=8)
     for batch in loader:
         total_step += 1
-        try:
-            model.zero_grad()
-            loss, kl_div, all_acc = model(batch, beta)
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
-            optimizer.step()
-        except Exception as e:
-            print(e)
-            continue
+        model.zero_grad()
+        loss, kl_div, all_acc = model(batch, beta)
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
+        optimizer.step()
 
         meters = meters + np.array([kl_div, all_acc[0] * 100, all_acc[1] * 100, all_acc[2] * 100])
 

@@ -145,7 +145,25 @@ def decompose(dotbracket_struct):
         external_checker = list(map(lambda x: x.upper().startswith('F') or x.upper().startswith('T'), mloops))
 
         if sum(mloop_checker) <= 2 or sum(external_checker) >= 1:
+            # an easy check, but there are examples that can slip off
             external_region_ids.extend([loop_id.upper() for loop_id in mloops])
+            continue
+
+        contains_external_segment = False
+        for mloop_id in mloops:
+            stem_ids = [stem_id.upper() for stem_id in bg.connections(mloop_id)]
+            e_3_idx, e_5_idx = hypernodes[stem_ids[0]]
+            l_3_idx, l_5_idx = hypernodes[stem_ids[1]]
+            if e_5_idx[-1] < l_3_idx[0]:
+                contains_external_segment = True
+            else:
+                contains_external_segment = False
+                break
+
+        if contains_external_segment:
+            external_region_ids.extend([loop_id.upper() for loop_id in mloops])
+            print(dotbracket_struct)
+            continue
 
         if sum(mloop_checker) > 2:
             all_nuc_idx = []
@@ -285,13 +303,13 @@ if __name__ == "__main__":
     np.set_printoptions(threshold=np.inf, edgeitems=30, linewidth=100000, )
 
     adjmat, node_labels, hpn_nodes_assignment = decompose(
-        "....((((((....((.......((((.((((.(((...(((((..........)))))...((.......))....)))......))))))))......))...)).))))......(((....((((((((...))))))))...)))........")
+        "(((..((((.(.............).)).))..))).((((((.....))))))..((((.(((((((.......))))))).))))...((((...((((((((((......)))))))))).))))")
     print(adjmat.todense())
     print(list(zip(node_labels, hpn_nodes_assignment)))
     node_labels = np.array(node_labels).astype('<U15')
     node_labels[node_labels == 'S'] = "Stem"
-    node_labels[node_labels == 'F'] = "Dangling Start"
-    node_labels[node_labels == 'T'] = "Dangling End"
+    # node_labels[node_labels == 'F'] = "Dangling Start"
+    # node_labels[node_labels == 'T'] = "Dangling End"
     node_labels[node_labels == 'M'] = "Multiloop"
     node_labels[node_labels == 'H'] = "Hairpin"
     node_labels[node_labels == 'I'] = "Internal loop"

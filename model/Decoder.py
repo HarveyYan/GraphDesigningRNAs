@@ -3,7 +3,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 
 # '<' to signal stop translation
@@ -11,7 +10,7 @@ NUC_VOCAB = ['A', 'C', 'G', 'U', '<']
 HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 
 MAX_NB = 10
-device = torch.device('cuda:0' if False else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 def dfs(stack, x, fa_idx):
@@ -27,11 +26,11 @@ def GRU(x, h, W_z, W_r, W_h):
     # a normal GRU cell
 
     z_input = r_input = torch.cat([x, h], dim=1)
-    z = F.sigmoid(W_z(z_input))
-    r = F.sigmoid(W_r(r_input))
+    z = torch.sigmoid(W_z(z_input))
+    r = torch.sigmoid(W_r(r_input))
     gated_h = r * h
     h_input = torch.cat([x, gated_h], dim=1)
-    pre_h = F.tanh(W_h(h_input))
+    pre_h = torch.tanh(W_h(h_input))
     new_h = (1.0 - z) * h + z * pre_h
     return new_h
 
@@ -76,11 +75,11 @@ class UnifiedDecoder(nn.Module):
         # hypernode label prediction: word_hpn
         # subgraph nucleotide preidiction: word_nuc
         if mode == 'word_hpn':
-            return self.W_hpn(F.relu(self.W_hpn_nonlinear(hiddens)))
+            return self.W_hpn(torch.relu(self.W_hpn_nonlinear(hiddens)))
         elif mode == 'word_nuc':
-            return self.W_nuc(F.relu(self.W_nuc_nonlinear(hiddens)))
+            return self.W_nuc(torch.relu(self.W_nuc_nonlinear(hiddens)))
         elif mode == 'stop':
-            return self.W_topo(F.relu(self.W_topo_nonlinear(hiddens)))
+            return self.W_topo(torch.relu(self.W_topo_nonlinear(hiddens)))
         else:
             raise ValueError('aggregate mode is wrong')
 
@@ -124,7 +123,6 @@ class UnifiedDecoder(nn.Module):
             offset = sum(depth_tree_batch[:batch_idx])
             h[(offset, offset + 1)] = torch.cat(
                 [tree_latent_vec[batch_idx], torch.zeros(self.hidden_size - self.latent_size).to(device)])
-        print(max_iter)
         for t in range(max_iter):
 
             prop_list = []
@@ -157,7 +155,10 @@ class UnifiedDecoder(nn.Module):
 
                 # decode a segment of nucleotides in the current hypernode
                 if node_x.hpn_label != 'H':
-                    node_nt_idx = node_x.nt_idx_assignment[nb_effective_msg - 1]
+                    try:
+                        node_nt_idx = node_x.nt_idx_assignment[nb_effective_msg - 1]
+                    except IndexError:
+                        exit()
                 else:
                     node_nt_idx = node_x.nt_idx_assignment
                 if t == 0:
@@ -195,7 +196,7 @@ class UnifiedDecoder(nn.Module):
 
             all_hidden_states = torch.stack(all_hidden_states, dim=1).view(-1, self.hidden_size)
             pre_padding_idx = (
-                        np.array(list(range(0, len(all_len) * max_len, max_len))) + np.array(all_len) - 1).astype(
+                    np.array(list(range(0, len(all_len) * max_len, max_len))) + np.array(all_len) - 1).astype(
                 np.long)
             new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
 
