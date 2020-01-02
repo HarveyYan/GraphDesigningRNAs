@@ -1,3 +1,4 @@
+import os
 import sys
 import math
 import torch
@@ -14,6 +15,7 @@ import lib.plot
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--save_dir', required=True)
 parser.add_argument('--hidden_size', type=int, default=450)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--latent_size', type=int, default=56)
@@ -64,6 +66,9 @@ total_step = 0
 beta = args.beta
 meters = np.zeros(4)
 
+if not os.path.exists(args.save_dir):
+    os.makedirs(args.save_dir)
+
 for epoch in range(args.epoch):
     loader = JunctionTreeFolder('data/rna_jt', args.batch_size, num_workers=8)
     for batch in loader:
@@ -91,7 +96,7 @@ for epoch in range(args.epoch):
 
 
         if total_step % args.save_iter == 0:
-            torch.save(model.state_dict(), args.save_dir + "/model.iter-" + str(total_step))
+            torch.save(model.state_dict(), os.path.join(args.save_dir, "model.iter-" + str(total_step)))
 
         if total_step % args.anneal_iter == 0:
             scheduler.step()

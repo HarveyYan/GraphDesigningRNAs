@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 import forgi.graph.bulge_graph as fgb
-import torch.nn.functional as F
 import numpy as np
 from lib.nnutils import index_select_ND
 

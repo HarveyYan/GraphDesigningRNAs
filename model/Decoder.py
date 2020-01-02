@@ -4,12 +4,14 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from lib.tree_decomp import RNAJunctionTree, RNAJTNode
 
 # '<' to signal stop translation
 NUC_VOCAB = ['A', 'C', 'G', 'U', '<']
 HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 
 MAX_NB = 10
+MAX_DECODE_LEN = 100
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
@@ -123,6 +125,7 @@ class UnifiedDecoder(nn.Module):
             offset = sum(depth_tree_batch[:batch_idx])
             h[(offset, offset + 1)] = torch.cat(
                 [tree_latent_vec[batch_idx], torch.zeros(self.hidden_size - self.latent_size).to(device)])
+
         for t in range(max_iter):
 
             prop_list = []
@@ -264,7 +267,7 @@ class UnifiedDecoder(nn.Module):
         stop_hiddens.append(stop_hidden)
         stop_targets.extend([0] * batch_size)
 
-        # decode last segment of the non pseudo root node
+        # decode the last segment of the non pseudo root node
         all_seq_input = []
         all_nuc_label = []
         for i in range(batch_size):
@@ -306,7 +309,7 @@ class UnifiedDecoder(nn.Module):
             [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)])
         all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
 
-        # hidden states for nucleotide reconstruction
+        # hidden states for segment reconstruction
         batch_idx = [c for i, length in enumerate(all_len) for c in [i] * length]
         all_hidden_states = torch.cat([
             all_hidden_states,
@@ -348,3 +351,131 @@ class UnifiedDecoder(nn.Module):
         return (hpn_pred_loss, nuc_pred_loss, stop_loss), \
                (hpn_pred_acc.item(), nuc_pred_acc.item(), stop_acc.item()), \
                h, traces
+
+    def decode_segment(self, last_token, hidden_state, graph_latent_vec):
+        decoded_nuc_idx = []
+        while True:
+            hidden_state = GRU(last_token, hidden_state, self.W_z, self.W_r, self.W_h)
+            nuc_pred_score = self.aggregate(torch.cat([hidden_state, graph_latent_vec], dim=1), 'word_nuc')
+            _, nuc_idx = torch.max(nuc_pred_score, dim=1)
+            nuc_idx = nuc_idx.item()
+            if nuc_idx == len(NUC_VOCAB) - 1:
+                # < for stop translation
+                break
+            decoded_nuc_idx.append(nuc_idx)
+            last_token = np.array(list(map(lambda x: x == decoded_nuc_idx[-1], range(len(NUC_VOCAB)))),
+                                  dtype=np.float32)
+            last_token = torch.as_tensor(last_token).to(device)
+
+        return hidden_state, last_token, decoded_nuc_idx
+
+    def decode(self, tree_latent_vec, graph_latent_vec, prob_decode):
+        # decode one graph at a time
+        # decoding starts from the 5' in a depth first topological order
+        assert (tree_latent_vec.size(0) == 1)
+        assert (graph_latent_vec.size(0) == 1)
+
+        rna_seq = ''
+        # a pseudo node
+        pseudo_node = RNAJTNode('P', [])
+        pseudo_node.idx = 0
+        stack = []
+        zero_pad = torch.zeros(1, 1, self.hidden_size).to(device)
+
+        # Root Prediction
+        tree_latent_vec = torch.cat([
+            tree_latent_vec,
+            torch.zeros(1, self.hidden_size - self.latent_size).to(device)], dim=1)
+        root_hpn_pred_score = self.aggregate(tree_latent_vec, 'word_hpn')
+        _, root_label_idx = torch.max(root_hpn_pred_score, dim=1)
+        root_label_idx = root_label_idx.item()
+
+        root = RNAJTNode(HYPERGRAPH_VOCAB[root_label_idx], [pseudo_node])
+        root.idx = 1
+        pseudo_node.neighbors.append(root)
+        stack.append((root, torch.zeros(1, len(NUC_VOCAB)), 0))
+        h = {(0, 1): tree_latent_vec}
+        all_nodes = [pseudo_node, root]
+
+        for step in range(MAX_DECODE_LEN):
+            node_x, last_token, last_token_idx = stack[-1]
+            node_incoming_msg = [h[(node_y.idx, node_x.idx)] for node_y in node_x.neighbors]
+            if len(node_incoming_msg) > 0:
+                node_incoming_msg = torch.stack(node_incoming_msg, dim=0).view(1, -1, self.hidden_size)
+            else:
+                node_incoming_msg = zero_pad
+
+            hpn_label = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
+            hpn_label = torch.as_tensor(hpn_label).to(device).view(1, len(HYPERGRAPH_VOCAB))
+
+            # Predict stop
+            node_incoming_msg = node_incoming_msg.sum(dim=1)
+            stop_hidden = torch.cat([hpn_label, node_incoming_msg], dim=1)
+            stop_score = self.aggregate(stop_hidden, 'stop')
+
+            if prob_decode:
+                backtrack = (torch.bernoulli(torch.sigmoid(stop_score)).item() == 0)
+            else:
+                backtrack = (stop_score.item() < 0)
+
+            if not backtrack:  # expand the graph: decode a segment and to predict next clique
+
+                hidden_state, last_token, decoded_nuc_idx = \
+                    self.decode_segment(last_token, node_incoming_msg, graph_latent_vec)
+
+                # todo, ensure that decoded_nuc_idx is not empty
+                if len(decoded_nuc_idx) == 0:
+                    return None
+
+                node_x.nt_idx_assignment.append(list(range(last_token_idx - 1 if last_token_idx > 0 else 0,
+                                                           last_token_idx + len(decoded_nuc_idx))))
+                last_token_idx += len(decoded_nuc_idx)
+
+                new_h = hidden_state
+                hpn_pred_score = self.aggregate(new_h, 'word_hpn')
+                _, hpn_label_idx = torch.max(hpn_pred_score, dim=1)
+                hpn_label_idx = hpn_label_idx.item()
+
+                # todo, eligbility check
+                node_y = RNAJTNode(HYPERGRAPH_VOCAB[hpn_label_idx], [])
+                node_y.idx = len(all_nodes)
+                node_y.neighbors.append(node_x)
+                h[(node_x.idx, node_y.idx)] = new_h[0]
+                stack.append((node_y, last_token, last_token_idx))
+                all_nodes.append(node_y)
+
+            if backtrack:  # Backtrack, use if instead of else
+                if len(stack) == 1:
+                    break  # At root, terminate
+
+                node_fa, _, _ = stack[-2]
+
+                hidden_state, last_token, decoded_nuc_idx = \
+                    self.decode_segment(last_token, node_incoming_msg, graph_latent_vec)
+
+                # todo, ensure that decoded_nuc_idx is not empty
+                if len(decoded_nuc_idx) == 0:
+                    return None
+
+                if len(node_x.nt_idx_assignment) != 0:
+                    node_x.nt_idx_assignment.append(list(range(last_token_idx - 1,
+                                                               last_token_idx + len(decoded_nuc_idx))))
+                else:
+                    # a hairpin node
+                    node_x.nt_idx_assignment = list(range(last_token_idx - 1,
+                                                          last_token_idx + len(decoded_nuc_idx)))
+                # ready to rollout to the next level
+                last_token_idx += len(decoded_nuc_idx)
+
+                new_h = hidden_state
+                h[(node_x.idx, node_fa.idx)] = new_h[0]
+                node_fa.neighbors.append(node_x)
+                stack.pop()
+                # modify node_fa
+                stack[-1] = (node_fa, last_token, last_token_idx)
+
+            rna_seq += ''.join(map(lambda idx: NUC_VOCAB[idx], decoded_nuc_idx))
+
+        return RNAJunctionTree(rna_seq, None, all_nodes)
+
+

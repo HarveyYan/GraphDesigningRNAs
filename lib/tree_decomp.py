@@ -5,7 +5,11 @@ import scipy.sparse as sp
 
 NUC_VOCAB = ['A', 'C', 'G', 'U']
 HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S', 'P']
-
+allowed_basepairs = [[False, False, False, True],
+                     [False, False, True, False],
+                     [False, True, False, True],
+                     [True, False, True, False]]
+# allow G-U
 
 # hairpin loop, internal loop, multiloop, stem, pseudo root node
 
@@ -26,23 +30,54 @@ class RNAJTNode:
 
 class RNAJunctionTree:
 
-    def __init__(self, rna_seq, rna_struct):
+    def __init__(self, rna_seq, rna_struct, **kwargs):
         self.rna_seq = list(rna_seq)
-        self.rna_struct = rna_struct
 
-        # hypergraph and connectivity between hypernodes
-        hp_adjmat, hpn_labels, hpn_assignment = decompose(self.rna_struct)
+        if rna_struct is not None and type(rna_struct) is str:
+            # ground truth junction tree decomposition
+            self.rna_struct = rna_struct
 
-        # root is always the first node
-        self.nodes = []
-        for i, label in enumerate(hpn_labels):
-            node = RNAJTNode(label, hpn_assignment[i])
-            node.idx = i
-            self.nodes.append(node)
+            # hypergraph and connectivity between hypernodes
+            hp_adjmat, hpn_labels, hpn_assignment = decompose(self.rna_struct)
 
-        for row_idx, col_idx in zip(*np.nonzero(hp_adjmat)):
-            self.nodes[row_idx].neighbors.append(self.nodes[col_idx])
+            # root is always the first node
+            self.nodes = []
+            for i, label in enumerate(hpn_labels):
+                node = RNAJTNode(label, hpn_assignment[i])
+                node.idx = i
+                self.nodes.append(node)
 
+            for row_idx, col_idx in zip(*np.nonzero(hp_adjmat)):
+                self.nodes[row_idx].neighbors.append(self.nodes[col_idx])
+        else:
+            # reconstructed from the decoder
+            self.nodes = kwargs.get('nodes')
+            is_valid = self.isvalid()
+            if not is_valid:
+                raise ValueError('Decoded RNA structure is not valid')
+
+    def isvalid(self):
+        # check:
+        # 1. even number of paired nucleotides
+        # 2. valid base pairing
+        for node in self.nodes:
+            if node.hpn_label == 'S':
+                nb_segments = len(node.nt_idx_assignment)
+                if nb_segments != 2:
+                    return False
+                if len(node.nt_idx_assignment[0]) != len(node.nt_idx_assignment[1]):
+                    return False
+                for nt_l_idx, nt_r_idx in zip(node.nt_idx_assignment[0], reversed(node.nt_idx_assignment[1])):
+                    if allowed_basepairs[nt_l_idx][nt_r_idx] is False:
+                        return False
+            elif node.hpn_label == 'I':
+                nb_segments = len(node.nt_idx_assignment)
+                if nb_segments != 2:
+                    return False
+            elif node_labels == 'M':
+                nb_segments = len(node.nt_idx_assignment)
+                if nb_segments < 3:
+                    return False
 
 def decompose(dotbracket_struct):
     bg = fgb.BulgeGraph.from_dotbracket(dotbracket_struct)
@@ -290,8 +325,8 @@ def decompose(dotbracket_struct):
     # junction_tree = ((junction_tree + junction_tree.T) > 0).astype(np.int32)
     # print(np.sum(clique_graph - junction_tree))
 
-    breadth_first_order = sp.csgraph.breadth_first_order(clique_graph, i_start=len(all_hpn_ids) - 1, directed=False,
-                                                         return_predecessors=False)
+    breadth_first_order = sp.csgraph.breadth_first_order(
+        clique_graph, i_start=len(all_hpn_ids) - 1, directed=False, return_predecessors=False)
     junction_tree = clique_graph[breadth_first_order, :][:, breadth_first_order]
     hpn_id = [hid[0] for hid in all_hpn_ids[breadth_first_order]]
     hpn_nodes_assignment = np.array(list(hypernodes.values()))[breadth_first_order]
@@ -299,11 +334,22 @@ def decompose(dotbracket_struct):
     return junction_tree, hpn_id, hpn_nodes_assignment
 
 
+def dfs(stack, x, fa_idx):
+    for y in x.neighbors:
+        if y.idx == fa_idx:
+            continue
+        stack.append((x.hpn_label, x.nt_idx_assignment, y.hpn_label, y.nt_idx_assignment, 1))
+        dfs(stack, y, x.idx)
+        stack.append((y.hpn_label, y.nt_idx_assignment, x.hpn_label, x.nt_idx_assignment, 0))
+
+
 if __name__ == "__main__":
     np.set_printoptions(threshold=np.inf, edgeitems=30, linewidth=100000, )
 
-    adjmat, node_labels, hpn_nodes_assignment = decompose(
-        "(((..((((.(.............).)).))..))).((((((.....))))))..((((.(((((((.......))))))).))))...((((...((((((((((......)))))))))).))))")
+    rna_seq = 'A' * 128
+    rna_struct = "(((..((((.(.............).)).))..))).((((((.....))))))..((((.(((((((.......))))))).))))...((((...((((((((((......)))))))))).))))"
+
+    adjmat, node_labels, hpn_nodes_assignment = decompose(rna_struct)
     print(adjmat.todense())
     print(list(zip(node_labels, hpn_nodes_assignment)))
     node_labels = np.array(node_labels).astype('<U15')
@@ -315,5 +361,10 @@ if __name__ == "__main__":
     node_labels[node_labels == 'I'] = "Internal loop"
     print(node_labels)
     from lib.plot import draw_graph
-
     draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
+
+    tree = RNAJunctionTree(rna_seq, rna_struct)
+    stack = []
+    dfs(stack, tree.nodes[1], 0)
+    for line in stack:
+        print(line)

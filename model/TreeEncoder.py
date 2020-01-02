@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
 from lib.nnutils import index_select_ND
 
 HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
