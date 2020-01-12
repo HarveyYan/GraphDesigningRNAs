@@ -30,6 +30,8 @@ class RNAJTNode:
 
 class RNAJunctionTree:
 
+    # [pseudo node, (non pseudo) root node, ...]
+
     def __init__(self, rna_seq, rna_struct, **kwargs):
         self.rna_seq = list(rna_seq)
 
@@ -58,8 +60,12 @@ class RNAJunctionTree:
 
     def isvalid(self):
         # check:
-        # 1. even number of paired nucleotides
+        # 1. equivalent amount of nucleotides on both sides of the stem
         # 2. valid base pairing
+        # - canonical base pairs
+        # - G-U pairs and A-A pairs
+        # 3. valid number of branches in each hypernode element
+        self.rna_struct = ['.'] * len(self.rna_seq)
         for node in self.nodes:
             if node.hpn_label == 'S':
                 nb_segments = len(node.nt_idx_assignment)
@@ -67,9 +73,15 @@ class RNAJunctionTree:
                     return False
                 if len(node.nt_idx_assignment[0]) != len(node.nt_idx_assignment[1]):
                     return False
+                if len(node.nt_idx_assignment[0]) == 0 or len(node.nt_idx_assignment[1]) == 0:
+                    return False
                 for nt_l_idx, nt_r_idx in zip(node.nt_idx_assignment[0], reversed(node.nt_idx_assignment[1])):
                     if allowed_basepairs[nt_l_idx][nt_r_idx] is False:
                         return False
+                for nt_idx in node.nt_idx_assignment[0]:
+                    self.rna_struct[nt_idx] = '('
+                for nt_idx in node.nt_idx_assignment[1]:
+                    self.rna_struct[nt_idx] = ')'
             elif node.hpn_label == 'I':
                 nb_segments = len(node.nt_idx_assignment)
                 if nb_segments != 2:
@@ -78,6 +90,8 @@ class RNAJunctionTree:
                 nb_segments = len(node.nt_idx_assignment)
                 if nb_segments < 3:
                     return False
+        self.rna_struct = ''.join(self.rna_struct)
+        return True
 
 def decompose(dotbracket_struct):
     bg = fgb.BulgeGraph.from_dotbracket(dotbracket_struct)
