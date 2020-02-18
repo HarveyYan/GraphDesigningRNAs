@@ -7,7 +7,8 @@ from lib.tree_decomp import RNAJunctionTree
 from tqdm import tqdm
 
 def preprocess(args):
-    obj = RNAJunctionTree(*args)
+    rna_seq, rna_struct, mfe = args
+    obj = RNAJunctionTree(rna_seq, rna_struct, free_energy=float(mfe))
     return obj
 
 if __name__ == "__main__":
@@ -24,7 +25,7 @@ if __name__ == "__main__":
     #     decompose(struct)
 
     pool = mp.Pool(8)
-    all_rna_jt = list(tqdm(pool.map(preprocess, zip(file['seq'], file['struct']))))
+    all_rna_jt = list(tqdm(pool.map(preprocess, zip(file['seq'], file['struct'], file['MFE']))))
 
     if not os.path.exists('./data/rna_jt'):
         os.makedirs('./data/rna_jt')

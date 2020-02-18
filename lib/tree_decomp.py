@@ -1,3 +1,4 @@
+import RNA
 import numpy as np
 from collections import OrderedDict
 import forgi.graph.bulge_graph as fgb
@@ -7,9 +8,9 @@ NUC_VOCAB = ['A', 'C', 'G', 'U']
 HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S', 'P']
 allowed_basepairs = [[False, False, False, True],
                      [False, False, True, False],
-                     [False, True, False, True],
+                     [False, True, False, True],  # allow G-U
                      [True, False, True, False]]
-# allow G-U
+
 
 # hairpin loop, internal loop, multiloop, stem, pseudo root node
 
@@ -51,12 +52,32 @@ class RNAJunctionTree:
 
             for row_idx, col_idx in zip(*np.nonzero(hp_adjmat)):
                 self.nodes[row_idx].neighbors.append(self.nodes[col_idx])
+
+            self.free_energy = kwargs.get('free_energy', None)
+
+            if self.free_energy is None:
+                self.free_energy = RNA.eval_structure_simple(self.rna_seq, self.rna_struct)
+
+            self.is_mfe = True
         else:
             # reconstructed from the decoder
             self.nodes = kwargs.get('nodes')
             is_valid = self.isvalid()
             if not is_valid:
                 raise ValueError('Decoded RNA structure is not valid')
+
+            self.free_energy = RNA.eval_structure_simple(self.rna_seq, self.rna_struct)
+            mfe_struct, mfe = RNA.fold(self.rna_seq)
+
+            if np.abs(self.free_energy - mfe) < 1e-6:
+                self.is_mfe = True
+            else:
+                self.is_mfe = False
+                self.mfe_struct = mfe_struct
+                self.mfe = mfe
+                self.struct_hamming_dist = np.sum(
+                    np.array(list(self.rna_struct)) - np.array(list(mfe)))
+                self.mfe_range = (mfe - self.free_energy) / mfe
 
     def isvalid(self):
         # check:
@@ -92,6 +113,7 @@ class RNAJunctionTree:
                     return False
         self.rna_struct = ''.join(self.rna_struct)
         return True
+
 
 def decompose(dotbracket_struct):
     bg = fgb.BulgeGraph.from_dotbracket(dotbracket_struct)
@@ -285,7 +307,7 @@ def decompose(dotbracket_struct):
                 else:
                     external_idx.append([len(dotbracket_struct) - 1])
 
-                hypernodes['I%d'%(nb_iloop)] = external_idx
+                hypernodes['I%d' % (nb_iloop)] = external_idx
                 hpn_neighbors.append([first_stem_idx])
                 attached_iloop_idx = len(hpn_neighbors) - 1
                 hpn_neighbors[first_stem_idx] += [attached_iloop_idx]
@@ -375,6 +397,7 @@ if __name__ == "__main__":
     node_labels[node_labels == 'I'] = "Internal loop"
     print(node_labels)
     from lib.plot import draw_graph
+
     draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
 
     tree = RNAJunctionTree(rna_seq, rna_struct)

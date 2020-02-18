@@ -469,7 +469,8 @@ class UnifiedDecoder(nn.Module):
                 if allowed_basepairs[start_nuc_idx][decoded_nuc_idx[-1]] is False:
                     return None
 
-            else:  # the first non pseudo root node, hence no complementarity contraint
+            else:  # the first non pseudo root node, hence no complementarity constraint
+                # todo, length constraints for completely single stranded RNA
                 res = self.decode_segment_with_constraint(
                     last_token, hidden_state, graph_latent_vec, prob_deocde=prob_decode)
 
@@ -505,6 +506,7 @@ class UnifiedDecoder(nn.Module):
                         min_internal_loop_length = 2
                     else:
                         min_internal_loop_length = 1
+                    # at the starting position in the 5' end
                     start_nuc_idx = NUC_VOCAB.index(current_node.decoded_segment[0][0])
 
                 else:  # dangling end
@@ -553,6 +555,8 @@ class UnifiedDecoder(nn.Module):
                 return None
             else:
                 hidden_state, decoded_nuc_idx = res
+        else:
+            return None
 
         # decoded_nuc_idx may be an empty list
         return hidden_state, last_token, decoded_nuc_idx

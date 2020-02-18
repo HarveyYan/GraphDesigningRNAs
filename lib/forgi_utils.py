@@ -105,7 +105,7 @@ def annotate(rna_seq, **kwargs):
     res = {
         'seq': output[0],
         'struct': output[1].split(' ')[0],
-        'MFE': ' '.join(output[1].split(' ')[1:]),
+        'MFE': ' '.join(output[1].split(' ')[1:])[1:-1],
         'stem': len(list(filter(lambda x: 's' in x, list(bg.defines.keys())))),
         'hairpin': len(list(filter(lambda x: 'h' in x, list(bg.defines.keys())))),
         'inter': len(list(filter(lambda x: 'i' in x, list(bg.defines.keys())))),
