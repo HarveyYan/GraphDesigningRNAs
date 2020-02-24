@@ -24,8 +24,8 @@ allowed_hpn_transition = [[False, False, False, False],
                           [False, False, False, True],
                           [True, True, True, False]]
 
-MAX_TREE_DECODE_STEPS = 100
-MAX_SEGMENT_LENGTH = 1000
+MAX_TREE_DECODE_STEPS = 500
+MAX_SEGMENT_LENGTH = 100
 MIN_HAIRPIN_LENGTH = 3
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -41,7 +41,6 @@ def dfs(stack, x, fa_idx):
 
 def GRU(x, h, W_z, W_r, W_h):
     # a normal GRU cell
-
     z_input = r_input = torch.cat([x, h], dim=1)
     z = torch.sigmoid(W_z(z_input))
     r = torch.sigmoid(W_r(r_input))
@@ -53,7 +52,7 @@ def GRU(x, h, W_z, W_r, W_h):
 
 
 def GraphGRU(x, h_nei, W_z, W_r, U_r, W_h):
-    hidden_size = x.size()[-1]
+    hidden_size = W_r.out_features
     sum_h = h_nei.sum(dim=1)
     z_input = torch.cat([x, sum_h], dim=1)
     z = torch.sigmoid(W_z(z_input))
@@ -98,7 +97,8 @@ class UnifiedDecoder(nn.Module):
 
         # topological prediction
         self.W_topo = nn.Linear(hidden_size, 1)
-        self.W_topo_nonlinear = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
+        # self.W_topo_nonlinear = nn.Linear(hidden_size + len(HYPERGRAPH_VOCAB), hidden_size)
+        self.W_topo_nonlinear = nn.Linear(hidden_size, hidden_size)
 
         # Loss Functions
         self.hpn_pred_loss = nn.CrossEntropyLoss(reduction='sum')
@@ -377,6 +377,10 @@ class UnifiedDecoder(nn.Module):
                (hpn_pred_acc.item(), nuc_pred_acc.item(), stop_acc.item()), \
                h, traces
 
+    ########################################
+    # decoding RNA with regularity constraint
+    ########################################
+
     def decode_segment_with_constraint(self, last_token, hidden_state, graph_latent_vec, **kwargs):
         prob_decode = kwargs.get('prob_deocde', False)
         minimal_length = kwargs.get('minimal_length', 0)
@@ -386,15 +390,19 @@ class UnifiedDecoder(nn.Module):
 
         decoded_nuc_idx = []
         stop_symbol_mask = torch.as_tensor(np.array([0., 0., 0., 0., -99999.], dtype=np.float32)).to(device)
-        first_nuc_idx = int(np.argmax(last_token.item()))
+        first_nuc_idx = int(np.argmax(last_token.data.numpy()))
 
         if second_stem_segment_complement_to_idx is not None:
-            # decode the second segment of stem complementarily to the given first segment
+            # decode the second segment of stem completely complementarily to the given first segment
+
             if allowed_basepairs[first_nuc_idx][second_stem_segment_complement_to_idx[0]] is False:
                 # check that we have the right nucleotide to begin with
+                print('stem decoding error')
                 return None
+                # raise ValueError('First nucleotide complementarity not met while decoding stem.')
+
             for first_seg_nuc_idx in second_stem_segment_complement_to_idx[1:]:
-                hidden_state = GRU(last_token, hidden_state, self.W_z, self.W_r, self.W_h)
+                hidden_state = GRU(last_token, hidden_state, self.W_z_nuc, self.W_r_nuc, self.W_h_nuc)
                 nuc_pred_score = self.aggregate(torch.cat([hidden_state, graph_latent_vec], dim=1), 'word_nuc')
                 mask = (torch.as_tensor(((np.array(allowed_basepairs[first_seg_nuc_idx] + [False]) - 1) *
                                          99999).astype(np.float32))).to(device)
@@ -408,15 +416,15 @@ class UnifiedDecoder(nn.Module):
 
                 decoded_nuc_idx.append(nuc_idx)
                 last_token = np.array(list(map(lambda x: x == nuc_idx, range(len(NUC_VOCAB)))),
-                                      dtype=np.float32)
+                                      dtype=np.float32)[None, :]
                 last_token = torch.as_tensor(last_token).to(device)
 
             # this one is for the stop token
-            hidden_state = GRU(last_token, hidden_state, self.W_z, self.W_r, self.W_h)
+            hidden_state = GRU(last_token, hidden_state, self.W_z_nuc, self.W_r_nuc, self.W_h_nuc)
         else:
             decode_step = 0
             while decode_step < MAX_SEGMENT_LENGTH:
-                hidden_state = GRU(last_token, hidden_state, self.W_z, self.W_r, self.W_h)
+                hidden_state = GRU(last_token, hidden_state, self.W_z_nuc, self.W_r_nuc, self.W_h_nuc)
                 nuc_pred_score = self.aggregate(torch.cat([hidden_state, graph_latent_vec], dim=1), 'word_nuc')
 
                 # length constraint
@@ -445,61 +453,56 @@ class UnifiedDecoder(nn.Module):
                     break
                 decoded_nuc_idx.append(nuc_idx)
                 last_token = np.array(list(map(lambda x: x == nuc_idx, range(len(NUC_VOCAB)))),
-                                      dtype=np.float32)
+                                      dtype=np.float32)[None, :]
                 last_token = torch.as_tensor(last_token).to(device)
                 decode_step += 1
 
-        return hidden_state, decoded_nuc_idx
+            if last_nuc_complement_to_idx is not None and \
+                    allowed_basepairs[last_nuc_complement_to_idx][decoded_nuc_idx[-1]] is False:
+                # raise ValueError('Last nucleotide complementarity not met while decoding loops (H/I/M).')
+                print(''.join([NUC_VOCAB[idx] for idx in decoded_nuc_idx]))
+                return None
 
-    def decode_segment(self, current_node, last_token, hidden_state, graph_latent_vec, prob_decode):
+        return hidden_state, decoded_nuc_idx, last_token
+
+    def decode_segment(self, current_node, last_token, hidden_state, graph_latent_vec, prob_decode, **kwargs):
 
         if current_node.hpn_label == 'H':
-            if current_node.idx != 1:  # parent node is a stem
-                start_nuc_idx = int(np.argmax(last_token.item()))
+
+            if current_node.idx > 1:
+                # parent node is a stem, thus current node is
+                # somewhere in the middle of this RNA structure
+                start_nuc_idx = int(np.argmax(last_token.data.numpy()))
 
                 res = self.decode_segment_with_constraint(
                     last_token, hidden_state, graph_latent_vec, prob_deocde=prob_decode,
                     minimal_length=MIN_HAIRPIN_LENGTH, last_nuc_complement_to_idx=start_nuc_idx)
 
                 if res is None:
-                    return None
+                    raise ValueError('Hairpin — last decoded nucleotide complementarity failed to hold.')
                 else:
-                    hidden_state, decoded_nuc_idx = res
-
-                if allowed_basepairs[start_nuc_idx][decoded_nuc_idx[-1]] is False:
-                    return None
-
-            else:  # the first non pseudo root node, hence no complementarity constraint
+                    hidden_state, decoded_nuc_idx, last_token = res
+            else:
+                # the first non pseudo root node
+                # hence no complementarity constraint
                 # todo, length constraints for completely single stranded RNA
                 res = self.decode_segment_with_constraint(
                     last_token, hidden_state, graph_latent_vec, prob_deocde=prob_decode)
 
-                if res is None:
-                    return None
-                else:
-                    hidden_state, decoded_nuc_idx = res
+                hidden_state, decoded_nuc_idx, last_token = res
 
         elif current_node.hpn_label == 'I':
 
-            if len(current_node.nt_idx_assignment) == 0:  # the first segment of internal loop
-
-                if current_node.idx != 1:  # connected by a stem
-                    min_internal_loop_length = 1
-                else:  # dangling start
-                    min_internal_loop_length = 0
+            if len(current_node.nt_idx_assignment) == 0:
 
                 res = self.decode_segment_with_constraint(
                     last_token, hidden_state, graph_latent_vec,
-                    prob_deocde=prob_decode, minimal_length=min_internal_loop_length)
+                    prob_deocde=prob_decode, minimal_length=1)
 
-                if res is None:
-                    return None
-                else:
-                    hidden_state, decoded_nuc_idx = res
-
-            else:  # the second segment
-
-                if current_node.idx != 1:  # connected by a stem
+                hidden_state, decoded_nuc_idx, last_token = res
+            else:
+                # the second segment of internal loop
+                if current_node.idx > 1:  # connected by a stem
                     if len(current_node.nt_idx_assignment[0]) == 2:
                         # two nucleotides on two closing stems
                         # the first segment of internal loop is empty, therefore the second segment must not be empty
@@ -508,7 +511,6 @@ class UnifiedDecoder(nn.Module):
                         min_internal_loop_length = 1
                     # at the starting position in the 5' end
                     start_nuc_idx = NUC_VOCAB.index(current_node.decoded_segment[0][0])
-
                 else:  # dangling end
                     if len(current_node.nt_idx_assignment[0]) == 1:
                         min_internal_loop_length = 1
@@ -521,29 +523,43 @@ class UnifiedDecoder(nn.Module):
                     minimal_length=min_internal_loop_length, last_nuc_complement_to_idx=start_nuc_idx)
 
                 if res is None:
-                    return None
+                    raise ValueError('Internal loop — last decoded nucleotide complementarity failed to hold.')
                 else:
-                    hidden_state, decoded_nuc_idx = res
-
-                if start_nuc_idx is not None and allowed_basepairs[start_nuc_idx][decoded_nuc_idx[-1]] is False:
-                    return None
+                    hidden_state, decoded_nuc_idx, last_token = res
 
         elif current_node.hpn_label == 'M':
 
+            if current_node.idx == 1 and kwargs['is_backtrack']:  # dangling end
+                min_length = 0
+                start_nuc_idx = None
+            elif current_node.idx > 1 and kwargs['is_backtrack']:
+                min_length = 1
+                start_nuc_idx = NUC_VOCAB.index(current_node.decoded_segment[0][0])
+            else:
+                min_length = 1
+                start_nuc_idx = None
+
             res = self.decode_segment_with_constraint(
                 last_token, hidden_state, graph_latent_vec,
-                prob_deocde=prob_decode, minimal_length=1)
+                prob_deocde=prob_decode, minimal_length=min_length, last_nuc_complement_to_idx=start_nuc_idx)
 
             if res is None:
-                return None
+                raise ValueError('Multiloop — last decoded nucleotide complementarity failed to hold.')
             else:
-                hidden_state, decoded_nuc_idx = res
+                hidden_state, decoded_nuc_idx, last_token = res
 
         elif current_node.hpn_label == 'S':
             if len(current_node.nt_idx_assignment) == 0:  # the first segment
+                # minimal length is zero, as the first starting nucleotide is a basepair
+
+                if int(torch.max(last_token).item()) == 0:
+                    # the first nucleotide to be decoded, then
+                    min_length = 1
+                else:
+                    min_length = 0
 
                 res = self.decode_segment_with_constraint(
-                    last_token, hidden_state, graph_latent_vec)
+                    last_token, hidden_state, graph_latent_vec, minimal_length=min_length)
 
             else:
                 res = self.decode_segment_with_constraint(
@@ -552,16 +568,17 @@ class UnifiedDecoder(nn.Module):
                     [NUC_VOCAB.index(nuc) for nuc in reversed(current_node.decoded_segment[0])])
 
             if res is None:
-                return None
+                raise ValueError('Stem — the first nucleotide on the second segment is '
+                                 'not complementary to what has been decoded.')
             else:
-                hidden_state, decoded_nuc_idx = res
+                hidden_state, decoded_nuc_idx, last_token = res
         else:
-            return None
+            raise ValueError('Unknown hypernode')
 
         # decoded_nuc_idx may be an empty list
         return hidden_state, last_token, decoded_nuc_idx
 
-    def decode(self, tree_latent_vec, graph_latent_vec, prob_decode):
+    def decode(self, tree_latent_vec, graph_latent_vec, prob_decode, verbose=False):
         '''
         Regularity(validity) constraint for stem:
           - topology constraint:
@@ -630,11 +647,14 @@ class UnifiedDecoder(nn.Module):
         root.idx = 1
         pseudo_node.neighbors.append(root)
         stack.append((root, torch.zeros(1, len(NUC_VOCAB)), 0))
+        root.decoded_segment = []
         h = {(0, 1): tree_latent_vec}
         all_nodes = [pseudo_node, root]
 
         for step in range(MAX_TREE_DECODE_STEPS):
             node_x, last_token, last_token_idx = stack[-1]
+            if node_x.hpn_label == 'P':
+                break
             node_incoming_msg = [h[(node_y.idx, node_x.idx)] for node_y in node_x.neighbors]
             if len(node_incoming_msg) > 0:
                 node_incoming_msg = torch.stack(node_incoming_msg, dim=0).view(1, -1, self.hidden_size)
@@ -668,7 +688,7 @@ class UnifiedDecoder(nn.Module):
 
             if not backtrack:  # expand the graph: decode a segment and to predict next clique
                 hidden_state, last_token, decoded_nuc_idx = \
-                    self.decode_segment(node_x, last_token, node_incoming_msg, graph_latent_vec, prob_decode)
+                    self.decode_segment(node_x, last_token, node_incoming_msg, graph_latent_vec, prob_decode, is_backtrack=backtrack)
                 node_x.nt_idx_assignment.append(list(range(last_token_idx - 1 if last_token_idx > 0 else 0,
                                                            last_token_idx + len(decoded_nuc_idx))))
                 last_token_idx += len(decoded_nuc_idx)
@@ -676,11 +696,12 @@ class UnifiedDecoder(nn.Module):
                 new_h = hidden_state
                 hpn_pred_score = self.aggregate(new_h, 'word_hpn')
 
-                mask = (torch.as_tensor(((np.array(allowed_hpn_transition[node_x.hpn_label]) - 1) *
-                                         99999).astype(np.float32))).to(device)
+                mask = (
+                    torch.as_tensor(((np.array(allowed_hpn_transition[HYPERGRAPH_VOCAB.index(node_x.hpn_label)]) - 1) *
+                                     99999).astype(np.float32))).to(device)
 
                 if prob_decode:
-                    hpn_label_idx = torch.multinomial(torch.softmax(hpn_pred_score, dim=1), num_samples=1)
+                    hpn_label_idx = torch.multinomial(torch.softmax(hpn_pred_score + mask, dim=1), num_samples=1)
                 else:
                     _, hpn_label_idx = torch.max(hpn_pred_score + mask, dim=1)
                 hpn_label_idx = hpn_label_idx.item()
@@ -689,30 +710,28 @@ class UnifiedDecoder(nn.Module):
                 node_y.decoded_segment = []
                 node_y.idx = len(all_nodes)
                 node_y.neighbors.append(node_x)
-                h[(node_x.idx, node_y.idx)] = new_h[0]
+                h[(node_x.idx, node_y.idx)] = new_h
                 stack.append((node_y, last_token, last_token_idx))
                 all_nodes.append(node_y)
             else:
-                if len(stack) == 0:
-                    break  # At root, terminate
 
                 node_fa, _, _ = stack[-2]
 
                 hidden_state, last_token, decoded_nuc_idx = \
-                    self.decode_segment(node_x, last_token, node_incoming_msg, graph_latent_vec, prob_decode)
+                    self.decode_segment(node_x, last_token, node_incoming_msg, graph_latent_vec, prob_decode, is_backtrack=backtrack)
 
                 if len(node_x.nt_idx_assignment) != 0:
-                    node_x.nt_idx_assignment.append(list(range(last_token_idx - 1,
+                    node_x.nt_idx_assignment.append(list(range(last_token_idx - 1 if last_token_idx > 0 else 0,
                                                                last_token_idx + len(decoded_nuc_idx))))
                 else:
                     # a hairpin node
-                    node_x.nt_idx_assignment = list(range(last_token_idx - 1,
+                    node_x.nt_idx_assignment = list(range(last_token_idx - 1 if last_token_idx > 0 else 0,
                                                           last_token_idx + len(decoded_nuc_idx)))
                 # ready to rollout to the next level
                 last_token_idx += len(decoded_nuc_idx)
 
                 new_h = hidden_state
-                h[(node_x.idx, node_fa.idx)] = new_h[0]
+                h[(node_x.idx, node_fa.idx)] = new_h
                 node_fa.neighbors.append(node_x)
                 stack.pop()
                 # modify node_fa
@@ -720,8 +739,16 @@ class UnifiedDecoder(nn.Module):
 
             rna_seq += ''.join(map(lambda idx: NUC_VOCAB[idx], decoded_nuc_idx))
             if node_x.hpn_label == 'H':
-                node_x.decoded_segment.extend(list(map(lambda idx: NUC_VOCAB[idx], node_x.nt_idx_assignment)))
+                node_x.decoded_segment.extend(list(map(lambda idx: rna_seq[idx], node_x.nt_idx_assignment)))
             else:
-                node_x.decoded_segment.append(list(map(lambda idx: NUC_VOCAB[idx], node_x.nt_idx_assignment[-1])))
+                node_x.decoded_segment.append(list(map(lambda idx: rna_seq[idx], node_x.nt_idx_assignment[-1])))
+
+            if verbose:
+                print('node index: {}, label: {}, total decoded segments: {}, expanding: {}'.
+                      format(node_x.idx, node_x.hpn_label,
+                             len(node_x.nt_idx_assignment) if node_x.hpn_label != 'H' else 1, not backtrack))
+                print('last decoded segment:', ''.join(node_x.decoded_segment) if node_x.hpn_label == 'H' else ''.join(
+                    node_x.decoded_segment[-1]))
+                print('size of stack:', len(stack))
 
         return RNAJunctionTree(rna_seq, None, nodes=all_nodes)

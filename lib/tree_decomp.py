@@ -66,8 +66,8 @@ class RNAJunctionTree:
             if not is_valid:
                 raise ValueError('Decoded RNA structure is not valid')
 
-            self.free_energy = RNA.eval_structure_simple(self.rna_seq, self.rna_struct)
-            mfe_struct, mfe = RNA.fold(self.rna_seq)
+            self.free_energy = RNA.eval_structure_simple(''.join(self.rna_seq), self.rna_struct)
+            mfe_struct, mfe = RNA.fold(''.join(self.rna_seq))
 
             if np.abs(self.free_energy - mfe) < 1e-6:
                 self.is_mfe = True
@@ -76,8 +76,8 @@ class RNAJunctionTree:
                 self.mfe_struct = mfe_struct
                 self.mfe = mfe
                 self.struct_hamming_dist = np.sum(
-                    np.array(list(self.rna_struct)) - np.array(list(mfe)))
-                self.mfe_range = (mfe - self.free_energy) / mfe
+                    np.array(list(self.rna_struct)) != np.array(list(mfe_struct)))
+                self.mfe_range = (mfe - self.free_energy) / mfe if mfe != 0 else None
 
     def isvalid(self):
         # check:
@@ -97,7 +97,9 @@ class RNAJunctionTree:
                 if len(node.nt_idx_assignment[0]) == 0 or len(node.nt_idx_assignment[1]) == 0:
                     return False
                 for nt_l_idx, nt_r_idx in zip(node.nt_idx_assignment[0], reversed(node.nt_idx_assignment[1])):
-                    if allowed_basepairs[nt_l_idx][nt_r_idx] is False:
+                    nt_l = NUC_VOCAB.index(self.rna_seq[nt_l_idx])
+                    nt_r = NUC_VOCAB.index(self.rna_seq[nt_r_idx])
+                    if allowed_basepairs[nt_l][nt_r] is False:
                         return False
                 for nt_idx in node.nt_idx_assignment[0]:
                     self.rna_struct[nt_idx] = '('
@@ -107,7 +109,7 @@ class RNAJunctionTree:
                 nb_segments = len(node.nt_idx_assignment)
                 if nb_segments != 2:
                     return False
-            elif node_labels == 'M':
+            elif node.hpn_label == 'M':
                 nb_segments = len(node.nt_idx_assignment)
                 if nb_segments < 3:
                     return False
@@ -382,8 +384,10 @@ def dfs(stack, x, fa_idx):
 if __name__ == "__main__":
     np.set_printoptions(threshold=np.inf, edgeitems=30, linewidth=100000, )
 
-    rna_seq = 'A' * 128
-    rna_struct = "(((..((((.(.............).)).))..))).((((((.....))))))..((((.(((((((.......))))))).))))...((((...((((((((((......)))))))))).))))"
+    # rna_seq = 'A' * 128
+    # rna_struct = "(((..((((.(.............).)).))..))).((((((.....))))))..((((.(((((((.......))))))).))))...((((...((((((((((......)))))))))).))))"
+    rna_seq = 'A' * 12
+    rna_struct = "(((...)))..."
 
     adjmat, node_labels, hpn_nodes_assignment = decompose(rna_struct)
     print(adjmat.todense())
