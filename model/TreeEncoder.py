@@ -10,7 +10,7 @@ HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 # there is no need to encode/decode the pseudo start node
 HPN_FDIM = len(['H', 'I', 'M', 'S'])
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
 def send_to_device(*args):
     ret = []
@@ -43,10 +43,12 @@ class TreeEncoder(nn.Module):
 
         batch_hpn_vec = []
         for start_idx, length in scope:
-            # skip the first pseudo node
+            # skip the first pseudo node (P) as it is merely a placeholder
             # only the root vector is kept
-            # todo, does including other nodes really confuse the decoding stage?
             batch_hpn_vec.append(hpn_embedding[start_idx + 1])
+
+            # batch_hpn_vec.append(torch.sum(hpn_embedding[start_idx: start_idx+length], dim=0))
+            # todo, does including other nodes really confuse the decoding stage?
 
         return messages, torch.stack(batch_hpn_vec)
 

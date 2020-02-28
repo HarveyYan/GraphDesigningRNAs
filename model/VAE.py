@@ -6,12 +6,12 @@ from model.TreeEncoder import TreeEncoder
 # from model.TreeDecoder import TreeDecoder
 from model.Decoder import UnifiedDecoder
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
 
 class JunctionTreeVAE(nn.Module):
 
-    def __init__(self, hidden_dim, latent_dim, depthG, depthT):
+    def __init__(self, hidden_dim, latent_dim, depthG, depthT, **kwargs):
         super(JunctionTreeVAE, self).__init__()
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
@@ -26,7 +26,7 @@ class JunctionTreeVAE(nn.Module):
         self.t_mean = nn.Linear(hidden_dim, latent_dim)
         self.t_var = nn.Linear(hidden_dim, latent_dim)
 
-        self.decoder = UnifiedDecoder(hidden_dim, latent_dim)
+        self.decoder = UnifiedDecoder(hidden_dim, latent_dim, **kwargs)
         # self.g_decoder = GraphDecoder(hidden_dim, latent_dim)
 
 

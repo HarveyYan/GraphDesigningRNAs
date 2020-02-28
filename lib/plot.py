@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 def draw_graph(adj=None, G = None, marginals=None,
                draw_edge_color=False, title=None,
-               node_size=300, node_labels=None):
+               node_size=300, node_labels=None, saveto=None):
 
     node_color = marginals
     if G is None:
@@ -24,7 +24,9 @@ def draw_graph(adj=None, G = None, marginals=None,
     nx.draw(G, node_color=marginals, edge_color = edge_color,
                      label=title, node_size = node_size,
                      labels=node_dict)
-    plt.savefig('tmp.png', dpi=300)
+    if saveto is None:
+        saveto = 'tmp.png'
+    plt.savefig(saveto, dpi=350)
 
 
 plt.style.use('classic')

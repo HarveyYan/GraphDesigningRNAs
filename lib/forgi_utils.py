@@ -20,7 +20,7 @@ MAPPING = {
     'A': 'U',
     'C': 'G',
     'G': 'C',
-    'T': 'A',
+    'U': 'A',
 }
 
 
@@ -119,12 +119,18 @@ def annotate(rna_seq, **kwargs):
     return res
 
 
-def generate_seq_dataset(size, length):
-    if not os.path.exists(os.path.join(basedir, 'data', 'all_cdna_{}.txt'.format(length))):
-        print('Preparing cDNA from ensembl file')
-        prepare_RNA_seq(size, length)
-    with open(os.path.join(basedir, 'data', 'all_cdna_{}.txt'.format(length)), 'r') as file, \
-            open(os.path.join(basedir, 'data', 'rna_dataset_{}.csv'.format(length)), 'w') as csv_file:
+def generate_seq_dataset(size, length, variable_length=False, min_length=32, max_length=512):
+    if variable_length:
+        filename = 'all_cdna_{}-{}.txt'.format(min_length, max_length)
+        csv_filename = 'rna_dataset_{}-{}.csv'.format(min_length, max_length)
+    else:
+        filename = 'all_cdna_{}.txt'.format(length)
+        csv_filename = 'rna_dataset_{}.csv'.format(length)
+    if not os.path.exists(os.path.join(basedir, 'data', filename)):
+        print('Preparing {} from ensembl file'.format(filename))
+        prepare_RNA_seq(size, length, variable_length, min_length, max_length)
+    with open(os.path.join(basedir, 'data', filename), 'r') as file, \
+            open(os.path.join(basedir, 'data', csv_filename), 'w') as csv_file:
         writer = csv.DictWriter(csv_file,
                                 fieldnames=['seq', 'struct', 'MFE', 'stem', 'hairpin', 'inter', 'multi_seg',
                                             'multi_cycle_soft', 'multi_cycle_strict'])
@@ -135,27 +141,50 @@ def generate_seq_dataset(size, length):
         writer.writerows(outcomes)
 
 
-def prepare_RNA_seq(size, length):
+def prepare_RNA_seq(size, length, variable_length=False, min_length=32, max_length=512):
     all_cDNA = []
-    with open(os.path.join(basedir, 'data', 'ensembl_cDNA.fa'), 'r') as file:
+    with open(os.path.join(basedir, 'data', 'Homo_sapiens.GRCh38.cdna.all.fa'), 'r') as file:
+        seq = ''
         for line in file:
             if line.startswith('>'):
-                continue
+                if len(seq) == 0 or len(seq) < min_length:
+                    continue
+
+                if not variable_length:
+                    cut_indices = list(range(0, len(seq), length))
+                    for i in range(len(cut_indices)):
+                        if i != len(cut_indices) - 1:
+                            if 'N' in seq[cut_indices[i]:cut_indices[i + 1]]:
+                                continue
+                            all_cDNA.append(seq[cut_indices[i]:cut_indices[i + 1]])
+                        elif len(seq[cut_indices[i]:]) == length:
+                            if 'N' in seq[cut_indices[i]:]:
+                                continue
+                            all_cDNA.append(seq[cut_indices[i]:])
+                else:
+                    while len(seq) > 0:
+                        sampled_length = int(np.around(np.random.rand() * (max_length - min_length))) + min_length
+                        if sampled_length >= len(seq):
+                            if len(seq) >= min_length and 'N' not in seq:
+                                all_cDNA.append(seq)
+                            seq = ''
+                        else:
+                            if 'N' not in seq[:sampled_length]:
+                                all_cDNA.append(seq[:sampled_length])
+                            seq = seq[sampled_length:]
             else:
-                seq = line.rstrip()
-                cut_indices = list(range(0, len(seq), length))
-                for i in range(len(cut_indices)):
-                    if i != len(cut_indices) - 1:
-                        all_cDNA.append(seq[cut_indices[i]:cut_indices[i + 1]])
-                        size -= 1
-                    elif len(seq[cut_indices[i]:]) == length:
-                        all_cDNA.append(seq[cut_indices[i]:])
-                        size -= 1
-                if len(all_cDNA) >= size:
-                    break
+                seq += line.rstrip().upper().replace('T', 'U')
+
+            if len(all_cDNA) >= size:
+                break
+
         all_cDNA = set(all_cDNA)
         print('All unique RNA seqs,', len(all_cDNA))
-    with open(os.path.join(basedir, 'data', 'all_cdna_{}.txt'.format(length)), 'w') as tofile:
+    if variable_length:
+        filename = 'all_cdna_{}-{}.txt'.format(min_length, max_length)
+    else:
+        filename = 'all_cdna_{}.txt'.format(length)
+    with open(os.path.join(basedir, 'data', filename), 'w') as tofile:
         tofile.writelines('\n'.join(all_cDNA))
 
 
@@ -180,6 +209,5 @@ def check_reverse_rnafold(**kwargs):
                 print(seq, struct, reversed_struct)
 
 
-
 if __name__ == "__main__":
-    generate_seq_dataset(size=100000, length=32)
+    generate_seq_dataset(5000000, None, variable_length=True, min_length=32, max_length=512)

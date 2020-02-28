@@ -42,6 +42,8 @@ class RNAJunctionTree:
 
             # hypergraph and connectivity between hypernodes
             hp_adjmat, hpn_labels, hpn_assignment = decompose(self.rna_struct)
+            self.hp_adjmat = hp_adjmat
+            self.node_labels = hpn_labels
 
             # root is always the first node
             self.nodes = []
@@ -56,7 +58,7 @@ class RNAJunctionTree:
             self.free_energy = kwargs.get('free_energy', None)
 
             if self.free_energy is None:
-                self.free_energy = RNA.eval_structure_simple(self.rna_seq, self.rna_struct)
+                self.free_energy = RNA.eval_structure_simple(''.join(self.rna_seq), self.rna_struct)
 
             self.is_mfe = True
         else:
@@ -78,6 +80,8 @@ class RNAJunctionTree:
                 self.struct_hamming_dist = np.sum(
                     np.array(list(self.rna_struct)) != np.array(list(mfe_struct)))
                 self.mfe_range = (mfe - self.free_energy) / mfe if mfe != 0 else None
+
+            self.get_junction_tree()
 
     def isvalid(self):
         # check:
@@ -115,6 +119,17 @@ class RNAJunctionTree:
                     return False
         self.rna_struct = ''.join(self.rna_struct)
         return True
+
+    def get_junction_tree(self):
+        data, row, col = [], [], []
+        for node in self.nodes:
+            for nb_node in node.neighbors:
+                row.append(node.idx)
+                col.append(nb_node.idx)
+                data.append(1)
+
+        self.hp_adjmat = sp.csr_matrix((data, (row, col)), shape=(len(self.nodes), len(self.nodes)))
+        self.node_labels = np.array([node.hpn_label for node in self.nodes])
 
 
 def decompose(dotbracket_struct):
@@ -235,7 +250,7 @@ def decompose(dotbracket_struct):
 
         if contains_external_segment:
             external_region_ids.extend([loop_id.upper() for loop_id in mloops])
-            print(dotbracket_struct)
+            # print(dotbracket_struct)
             continue
 
         if sum(mloop_checker) > 2:
@@ -376,33 +391,33 @@ def dfs(stack, x, fa_idx):
     for y in x.neighbors:
         if y.idx == fa_idx:
             continue
-        stack.append((x.hpn_label, x.nt_idx_assignment, y.hpn_label, y.nt_idx_assignment, 1))
+        stack.append((x.hpn_label, y.hpn_label, 1))
         dfs(stack, y, x.idx)
-        stack.append((y.hpn_label, y.nt_idx_assignment, x.hpn_label, x.nt_idx_assignment, 0))
+        stack.append((y.hpn_label, x.hpn_label, 0))
 
 
 if __name__ == "__main__":
     np.set_printoptions(threshold=np.inf, edgeitems=30, linewidth=100000, )
 
-    # rna_seq = 'A' * 128
-    # rna_struct = "(((..((((.(.............).)).))..))).((((((.....))))))..((((.(((((((.......))))))).))))...((((...((((((((((......)))))))))).))))"
-    rna_seq = 'A' * 12
-    rna_struct = "(((...)))..."
+    rna_seq = 'GAGCAUAGAACUGCAACAGUUAUAUUCUGAGUCAAAGUUGGGGCUUUUUACGGCAUAAUUAUGGAAUUUUUAUUUACUGGUAGAGAGGAGACGAGAGGCUUUUUCAGUGGGCCUGGGACAGUGGCUGC'
+    rna_struct = "..(((......)))..(((((((..(((.(((((..(..((((((((((....(((....)))...((((((((....))))))))......))))))))))..)..)))..)).)))..)))))))."
+    # rna_seq = 'A' * 12
+    # rna_struct = "(((...)))..."
 
     adjmat, node_labels, hpn_nodes_assignment = decompose(rna_struct)
-    print(adjmat.todense())
-    print(list(zip(node_labels, hpn_nodes_assignment)))
-    node_labels = np.array(node_labels).astype('<U15')
-    node_labels[node_labels == 'S'] = "Stem"
-    # node_labels[node_labels == 'F'] = "Dangling Start"
-    # node_labels[node_labels == 'T'] = "Dangling End"
-    node_labels[node_labels == 'M'] = "Multiloop"
-    node_labels[node_labels == 'H'] = "Hairpin"
-    node_labels[node_labels == 'I'] = "Internal loop"
-    print(node_labels)
-    from lib.plot import draw_graph
-
-    draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
+    # print(adjmat.todense())
+    # print(list(zip(node_labels, hpn_nodes_assignment)))
+    # node_labels = np.array(node_labels).astype('<U15')
+    # node_labels[node_labels == 'S'] = "Stem"
+    # # node_labels[node_labels == 'F'] = "Dangling Start"
+    # # node_labels[node_labels == 'T'] = "Dangling End"
+    # node_labels[node_labels == 'M'] = "Multiloop"
+    # node_labels[node_labels == 'H'] = "Hairpin"
+    # node_labels[node_labels == 'I'] = "Internal loop"
+    # print(node_labels)
+    # from lib.plot import draw_graph
+    #
+    # draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
 
     tree = RNAJunctionTree(rna_seq, rna_struct)
     stack = []

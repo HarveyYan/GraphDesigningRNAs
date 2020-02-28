@@ -61,7 +61,7 @@ def tensorize(tree_batch):
 
 
 if __name__ == "__main__":
-    loader = JunctionTreeFolder('../data/rna_jt', 32, num_workers=0)
+    loader = JunctionTreeFolder('../data/rna_jt_32-512', 32, num_workers=0)
     for batch in loader:
         tree_batch, graph_encoder_input, tree_encoder_input = batch
         f_nuc, f_bond, node_graph, message_graph, scope = graph_encoder_input
@@ -72,3 +72,20 @@ if __name__ == "__main__":
         print('total number of messages on the hypergraph:', f_message.shape[0])
         print('maximum incoming messages to a node:', hp_node_graph.shape[1])
         print('#' * 30)
+
+        from lib.plot import draw_graph
+        for i, tree in enumerate(tree_batch):
+            print(tree.rna_seq)
+            print(tree.rna_struct)
+            print('\n')
+            tree.get_junction_tree()
+            node_labels = tree.node_labels
+            node_labels[node_labels == 'S'] = "Stem"
+            # node_labels[node_labels == 'F'] = "Dangling Start"
+            # node_labels[node_labels == 'T'] = "Dangling End"
+            node_labels[node_labels == 'M'] = "Multiloop"
+            node_labels[node_labels == 'H'] = "Hairpin"
+            node_labels[node_labels == 'I'] = "Internal loop"
+            draw_graph(tree.hp_adjmat, node_labels, saveto='%d.jpg'%(i))
+
+        break

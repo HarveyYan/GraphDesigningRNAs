@@ -18,7 +18,7 @@ BOND_FDIM = 4
 MAX_NB = 3
 # maximal number of incoming messages
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
 def send_to_device(*args):
     ret = []
