@@ -3,26 +3,23 @@ import torch.nn as nn
 
 from model.GraphEncoder import GraphEncoder
 from model.TreeEncoder import TreeEncoder
-# from model.TreeDecoder import TreeDecoder
 from model.Decoder import UnifiedDecoder
-
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
-
 
 class JunctionTreeVAE(nn.Module):
 
     def __init__(self, hidden_dim, latent_dim, depthG, depthT, **kwargs):
         super(JunctionTreeVAE, self).__init__()
+        self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
         self.depthG = depthG
         self.depthT = depthT
 
-        self.g_encoder = GraphEncoder(self.hidden_dim, self.depthG)
+        self.g_encoder = GraphEncoder(self.hidden_dim, self.depthG, **kwargs)
         self.g_mean = nn.Linear(hidden_dim, latent_dim)
         self.g_var = nn.Linear(hidden_dim, latent_dim)
 
-        self.t_encoder = TreeEncoder(self.hidden_dim, self.depthT)
+        self.t_encoder = TreeEncoder(self.hidden_dim, self.depthT, **kwargs)
         self.t_mean = nn.Linear(hidden_dim, latent_dim)
         self.t_var = nn.Linear(hidden_dim, latent_dim)
 
@@ -40,7 +37,7 @@ class JunctionTreeVAE(nn.Module):
         z_mean = W_mean(z_vecs)
         z_log_var = -torch.abs(W_var(z_vecs))  # Following Mueller et al.
         kl_loss = -0.5 * torch.sum(1.0 + z_log_var - z_mean * z_mean - torch.exp(z_log_var)) / batch_size
-        epsilon = torch.randn_like(z_mean).to(device)
+        epsilon = torch.randn_like(z_mean).to(self.device)
         z_vecs = z_mean + torch.exp(z_log_var / 2) * epsilon
         return z_vecs, kl_loss
 
@@ -62,7 +59,7 @@ class JunctionTreeVAE(nn.Module):
 
 
 if __name__ == "__main__":
-    test_model = JunctionTreeVAE(30, 30, 10, 20).to(device)
+    test_model = JunctionTreeVAE(30, 30, 10, 20)
     from lib.data_utils import JunctionTreeFolder
 
     loader = JunctionTreeFolder('../data/rna_jt', 32, num_workers=0)

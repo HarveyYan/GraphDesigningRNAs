@@ -391,9 +391,53 @@ def dfs(stack, x, fa_idx):
     for y in x.neighbors:
         if y.idx == fa_idx:
             continue
-        stack.append((x.hpn_label, y.hpn_label, 1))
+        stack.append((x, y, 1))
         dfs(stack, y, x.idx)
-        stack.append((y.hpn_label, x.hpn_label, 0))
+        stack.append((y, x, 0))
+
+
+def get_tree_height(adjmat):
+    triu_adjmat = np.triu(adjmat)  # directionalize
+    pow_triu_adjmat = triu_adjmat
+    n_power = 1
+    while np.max(pow_triu_adjmat[0, :]) == 1:
+        n_power += 1
+        pow_triu_adjmat = np.linalg.matrix_power(triu_adjmat, n_power)
+    return n_power - 1
+
+
+def dfs_nt_traversal_check(tree):
+    nt_start_idx = 0
+    stack = []
+    visit_count = [0] * len(tree.nodes)
+    dfs(stack, tree.nodes[1], 0)
+    for line in stack:
+        if line[0].hpn_label == 'H':
+            all_nt_idx = line[0].nt_idx_assignment
+        else:
+            all_nt_idx = line[0].nt_idx_assignment[visit_count[line[0].idx]]
+            visit_count[line[0].idx] += 1
+
+        if nt_start_idx != all_nt_idx[0]:
+            return False
+        nt_start_idx = all_nt_idx[-1]
+
+    last_node = tree.nodes[1]
+    if last_node.hpn_label == 'H':
+        all_nt_idx = last_node.nt_idx_assignment
+    else:
+        all_nt_idx = last_node.nt_idx_assignment[-1]
+
+    if nt_start_idx != all_nt_idx[0]:
+        return False
+    nt_start_idx = all_nt_idx[-1]
+
+    if nt_start_idx != len(tree.rna_seq) - 1:
+        return False
+    else:
+        return True
+
+
 
 
 if __name__ == "__main__":

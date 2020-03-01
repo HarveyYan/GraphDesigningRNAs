@@ -10,31 +10,30 @@ HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 # there is no need to encode/decode the pseudo start node
 HPN_FDIM = len(['H', 'I', 'M', 'S'])
 
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
-
-def send_to_device(*args):
-    ret = []
-    for item in args:
-        ret.append(item.to(device))
-    return ret
-
 class TreeEncoder(nn.Module):
 
-    def __init__(self, hidden_size, depth):
+    def __init__(self, hidden_size, depth, **kwargs):
         super(TreeEncoder, self).__init__()
+        self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.depth = depth
         self.output_w = nn.Linear(2 * self.hidden_size + len(HYPERGRAPH_VOCAB), self.hidden_size)
         self.GRU = GraphGRU(hidden_size + HPN_FDIM, hidden_size, depth=depth)
 
+    def send_to_device(self, *args):
+        ret = []
+        for item in args:
+            ret.append(item.to(self.device))
+        return ret
+
     def forward(self, nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope):
         nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
-            send_to_device(nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph)
-        nuc_emb = torch.cat([nuc_emebedding, torch.zeros(1, nuc_emebedding.size(1)).to(device)], dim=0)
+            self.send_to_device(nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph)
+        nuc_emb = torch.cat([nuc_emebedding, torch.zeros(1, nuc_emebedding.size(1)).to(self.device)], dim=0)
         f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).sum(dim=1)  # [nb_nodes, hidden_size]
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
-        messages = torch.zeros(message_graph.size(0), self.hidden_size).to(device)
+        messages = torch.zeros(message_graph.size(0), self.hidden_size).to(self.device)
         f_message = index_select_ND(f_node, 0, f_message)  # [nb_msg, nb_neighbors, hidden_size+4]
         messages = self.GRU(messages, f_message, message_graph)
 
@@ -135,8 +134,9 @@ class TreeEncoder(nn.Module):
 
 class GraphGRU(nn.Module):
 
-    def __init__(self, input_size, hidden_size, depth):
+    def __init__(self, input_size, hidden_size, depth, **kwargs):
         super(GraphGRU, self).__init__()
+        self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.input_size = input_size
         self.depth = depth
@@ -147,7 +147,7 @@ class GraphGRU(nn.Module):
         self.W_h = nn.Linear(input_size + hidden_size, hidden_size)
 
     def forward(self, messages, local_field, mess_graph):
-        mask = torch.ones(messages.size(0), 1).to(device)
+        mask = torch.ones(messages.size(0), 1).to(self.device)
         mask[0] = 0  # first vector is padding
 
         for it in range(self.depth):

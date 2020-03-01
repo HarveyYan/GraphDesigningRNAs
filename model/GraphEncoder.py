@@ -18,19 +18,12 @@ BOND_FDIM = 4
 MAX_NB = 3
 # maximal number of incoming messages
 
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
-
-def send_to_device(*args):
-    ret = []
-    for item in args:
-        ret.append(item.to(device))
-    return ret
-
 
 class GraphEncoder(nn.Module):
 
-    def __init__(self, hidden_size, depth):
+    def __init__(self, hidden_size, depth, **kwargs):
         super(GraphEncoder, self).__init__()
+        self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.depth = depth
 
@@ -38,9 +31,15 @@ class GraphEncoder(nn.Module):
         self.w_msg = nn.Linear(hidden_size, hidden_size, bias=False)
         self.w_node_emb = nn.Linear(NUC_FDIM + hidden_size, hidden_size, bias=False)
 
+    def send_to_device(self, *args):
+        ret = []
+        for item in args:
+            ret.append(item.to(self.device))
+        return ret
+
     def forward(self, f_nuc, f_bond, node_graph, message_graph, scope):
         f_nuc, f_bond, node_graph, message_graph = \
-            send_to_device(f_nuc, f_bond, node_graph, message_graph)
+            self.send_to_device(f_nuc, f_bond, node_graph, message_graph)
         local_potentials = self.w_local(f_bond)
         # messages from the first iteration
         messages = torch.relu(local_potentials)

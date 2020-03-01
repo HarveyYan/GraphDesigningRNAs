@@ -27,7 +27,6 @@ allowed_hpn_transition = [[False, False, False, False],
 MAX_TREE_DECODE_STEPS = 500
 MAX_SEGMENT_LENGTH = 100
 MIN_HAIRPIN_LENGTH = 3
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
 
 def dfs(stack, x, fa_idx):
@@ -73,6 +72,7 @@ class UnifiedDecoder(nn.Module):
 
     def __init__(self, hidden_size, latent_size, **kwargs):
         super(UnifiedDecoder, self).__init__()
+        self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.latent_size = latent_size
 
@@ -132,7 +132,7 @@ class UnifiedDecoder(nn.Module):
         for seq_input in all_seq_input:
             # paddings
             seq_input += [np.zeros(len(NUC_VOCAB), dtype=np.float32)] * (max_len - len(seq_input))
-        all_seq_input = torch.as_tensor(np.array(all_seq_input)).to(device)
+        all_seq_input = torch.as_tensor(np.array(all_seq_input)).to(self.device)
 
         pre_padding_idx = (np.array(list(range(0, len(all_len) * max_len, max_len)))
                            + np.array(all_len) - 1).astype(np.long)
@@ -148,9 +148,9 @@ class UnifiedDecoder(nn.Module):
             all_hidden_states = torch.stack(all_hidden_states, dim=1).view(-1, self.hidden_size)
             all_cell_memories = torch.stack(all_cell_memories, dim=1).view(-1, self.hidden_size)
 
-            new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
-            graph_latent_vec = all_cell_memories.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
-            all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(all_pre_padding_idx).to(device))
+            new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(self.device))
+            graph_latent_vec = all_cell_memories.index_select(0, torch.as_tensor(pre_padding_idx).to(self.device))
+            all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(all_pre_padding_idx).to(self.device))
         else:
             all_hidden_states = []
             for len_idx in range(max_len):
@@ -160,14 +160,14 @@ class UnifiedDecoder(nn.Module):
             all_hidden_states = torch.stack(all_hidden_states, dim=1).view(-1, self.hidden_size)
 
             # the last hidden state at each segment
-            new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(device))
-            all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(all_pre_padding_idx).to(device))
+            new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(self.device))
+            all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(all_pre_padding_idx).to(self.device))
 
             # hidden states to reconstruct segments of nucleotides
             batch_idx = [c for i, length in enumerate(all_len) for c in [i] * length]
             all_hidden_states = torch.cat([
                 all_hidden_states,
-                graph_latent_vec.index_select(0, torch.as_tensor(np.array(batch_idx, dtype=np.long)).to(device))
+                graph_latent_vec.index_select(0, torch.as_tensor(np.array(batch_idx, dtype=np.long)).to(self.device))
             ], dim=1)
 
         return new_h, all_hidden_states, graph_latent_vec
@@ -200,19 +200,19 @@ class UnifiedDecoder(nn.Module):
         batch_size = len(rna_tree_batch)
         tree_latent_vec = torch.cat([
             tree_latent_vec,
-            torch.zeros(batch_size, self.hidden_size - self.latent_size).to(device)
+            torch.zeros(batch_size, self.hidden_size - self.latent_size).to(self.device)
         ], dim=1)
         if self.decode_nuc_with_lstm:
             graph_latent_vec = torch.cat([
                 graph_latent_vec,
-                torch.zeros(batch_size, self.hidden_size - self.latent_size).to(device)
+                torch.zeros(batch_size, self.hidden_size - self.latent_size).to(self.device)
             ], dim=1)
         hpn_pred_hiddens.append(tree_latent_vec)
         hpn_pred_targets.extend([HYPERGRAPH_VOCAB.index(tree.nodes[1].hpn_label) for tree in rna_tree_batch])
 
         depth_tree_batch = [len(tree.nodes) for tree in rna_tree_batch]
         max_iter = max([len(tr) for tr in traces])
-        msg_padding = torch.zeros(self.hidden_size).to(device)
+        msg_padding = torch.zeros(self.hidden_size).to(self.device)
         nuc_padding = np.zeros(len(NUC_VOCAB), dtype=np.float32)
         h = {}
 
@@ -269,7 +269,7 @@ class UnifiedDecoder(nn.Module):
                 all_seq_input.append(seq_input)
 
             # messages for hyper node topological prediction
-            hpn_label = torch.as_tensor(np.array(hpn_label)).to(device)
+            hpn_label = torch.as_tensor(np.array(hpn_label)).to(self.device)
             all_len = [len(incoming_msg) for incoming_msg in node_incoming_msg]
             max_len = max(all_len)
             for incoming_msg in node_incoming_msg:
@@ -281,12 +281,17 @@ class UnifiedDecoder(nn.Module):
             node_incoming_msg = GraphGRU(hpn_label, node_incoming_msg,
                                          self.W_z_mp, self.W_r_mp, self.U_r_mp, self.W_h_mp)
 
-            tensor_batch_list = torch.as_tensor(np.array(batch_list, dtype=np.long)).to(device)
+            tensor_batch_list = torch.as_tensor(np.array(batch_list, dtype=np.long)).to(self.device)
             batch_graph_latent_vec = graph_latent_vec.index_select(0, tensor_batch_list)
-            new_h, all_hidden_states, batch_graph_latent_vec = self.teacher_forced_decoding(
-                all_seq_input, node_incoming_msg, batch_graph_latent_vec)
             if self.decode_nuc_with_lstm:
+                _, all_hidden_states, batch_graph_latent_vec = self.teacher_forced_decoding(
+                    all_seq_input, node_incoming_msg, batch_graph_latent_vec)
+                # when decoding with a LSTM, do not alter the tree messages, update the graph latent vector on the other hand
+                new_h = node_incoming_msg
                 graph_latent_vec = graph_latent_vec.scatter_(0, torch.stack([tensor_batch_list]*self.hidden_size, dim=1), batch_graph_latent_vec)
+            else:
+                new_h, all_hidden_states, batch_graph_latent_vec = self.teacher_forced_decoding(
+                    all_seq_input, node_incoming_msg, batch_graph_latent_vec)
             nuc_pred_hiddens.append(all_hidden_states)
             nuc_pred_targets.extend(all_nuc_label)
 
@@ -315,7 +320,7 @@ class UnifiedDecoder(nn.Module):
             # hidden states for label prediction
             if len(pred_list) > 0:
                 # list where we make label predictions
-                cur_pred = torch.as_tensor(np.array(pred_list, dtype=np.long)).to(device)
+                cur_pred = torch.as_tensor(np.array(pred_list, dtype=np.long)).to(self.device)
                 hpn_pred_hiddens.append(new_h.index_select(0, cur_pred))
                 hpn_pred_targets.extend(pred_target)
 
@@ -326,7 +331,7 @@ class UnifiedDecoder(nn.Module):
             offset = sum(depth_tree_batch[:batch_idx])
             node_x = tree.nodes[1]
             onehot_enc = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
-            hpn_label.append(torch.as_tensor(onehot_enc).to(device))
+            hpn_label.append(torch.as_tensor(onehot_enc).to(self.device))
             incoming_msg = [h[(node_y.idx + offset, node_x.idx + offset)] for node_y in node_x.neighbors]
             node_incoming_msg.append(incoming_msg)
 
@@ -377,7 +382,7 @@ class UnifiedDecoder(nn.Module):
         # Predict next clique
         hpn_pred_hiddens = torch.cat(hpn_pred_hiddens, dim=0)
         hpn_pred_scores = self.aggregate(hpn_pred_hiddens, 'word_hpn')
-        hpn_pred_targets = torch.as_tensor(np.array(hpn_pred_targets, dtype=np.long)).to(device)
+        hpn_pred_targets = torch.as_tensor(np.array(hpn_pred_targets, dtype=np.long)).to(self.device)
         hpn_pred_loss = self.hpn_pred_loss(hpn_pred_scores, hpn_pred_targets) / len(rna_tree_batch)
         _, hpn_preds = torch.max(hpn_pred_scores, dim=1)
         hpn_pred_acc = torch.eq(hpn_preds, hpn_pred_targets).float()
@@ -386,7 +391,7 @@ class UnifiedDecoder(nn.Module):
         # Predict nucleotides
         nuc_pred_hiddens = torch.cat(nuc_pred_hiddens, dim=0)
         nuc_pred_scores = self.aggregate(nuc_pred_hiddens, 'word_nuc')
-        nuc_pred_targets = torch.as_tensor(np.array(nuc_pred_targets, dtype=np.long)).to(device)
+        nuc_pred_targets = torch.as_tensor(np.array(nuc_pred_targets, dtype=np.long)).to(self.device)
         nuc_pred_loss = self.nuc_pred_loss(nuc_pred_scores, nuc_pred_targets) / len(rna_tree_batch)
         _, nuc_preds = torch.max(nuc_pred_scores, dim=1)
         nuc_pred_acc = torch.eq(nuc_preds, nuc_pred_targets).float()
@@ -396,7 +401,7 @@ class UnifiedDecoder(nn.Module):
         stop_hiddens = torch.cat(stop_hiddens, dim=0)
         stop_scores = self.aggregate(stop_hiddens, 'stop')
         stop_scores = stop_scores.squeeze(-1)
-        stop_targets = torch.as_tensor(np.array(stop_targets, dtype=np.float32)).to(device)
+        stop_targets = torch.as_tensor(np.array(stop_targets, dtype=np.float32)).to(self.device)
         stop_loss = self.stop_loss(stop_scores, stop_targets) / len(rna_tree_batch)
         stops = torch.ge(stop_scores, 0).float()
         stop_acc = torch.eq(stops, stop_targets).float()
@@ -418,7 +423,7 @@ class UnifiedDecoder(nn.Module):
         # properly reversed
 
         decoded_nuc_idx = []
-        stop_symbol_mask = torch.as_tensor(np.array([0., 0., 0., 0., -99999.], dtype=np.float32)).to(device)
+        stop_symbol_mask = torch.as_tensor(np.array([0., 0., 0., 0., -99999.], dtype=np.float32)).to(self.device)
         first_nuc_idx = int(np.argmax(last_token.cpu().data.numpy()))
 
         if second_stem_segment_complement_to_idx is not None:
@@ -438,7 +443,7 @@ class UnifiedDecoder(nn.Module):
                     hidden_state = GRU(last_token, hidden_state, self.W_z_nuc, self.W_r_nuc, self.W_h_nuc)
                     nuc_pred_score = self.aggregate(torch.cat([hidden_state, graph_latent_vec], dim=1), 'word_nuc')
                 mask = (torch.as_tensor(((np.array(allowed_basepairs[first_seg_nuc_idx] + [False]) - 1) *
-                                         99999).astype(np.float32))).to(device)
+                                         99999).astype(np.float32))).to(self.device)
                 nuc_pred_score = nuc_pred_score + mask
 
                 if prob_decode:
@@ -450,7 +455,7 @@ class UnifiedDecoder(nn.Module):
                 decoded_nuc_idx.append(nuc_idx)
                 last_token = np.array(list(map(lambda x: x == nuc_idx, range(len(NUC_VOCAB)))),
                                       dtype=np.float32)[None, :]
-                last_token = torch.as_tensor(last_token).to(device)
+                last_token = torch.as_tensor(last_token).to(self.device)
 
             # this one is for the stop token
             if self.decode_nuc_with_lstm:
@@ -494,13 +499,13 @@ class UnifiedDecoder(nn.Module):
                 decoded_nuc_idx.append(nuc_idx)
                 last_token = np.array(list(map(lambda x: x == nuc_idx, range(len(NUC_VOCAB)))),
                                       dtype=np.float32)[None, :]
-                last_token = torch.as_tensor(last_token).to(device)
+                last_token = torch.as_tensor(last_token).to(self.device)
                 decode_step += 1
 
             if last_nuc_complement_to_idx is not None and \
                     allowed_basepairs[last_nuc_complement_to_idx][decoded_nuc_idx[-1]] is False:
                 # raise ValueError('Last nucleotide complementarity not met while decoding loops (H/I/M).')
-                print('erratic decoded segment', ''.join([NUC_VOCAB[idx] for idx in decoded_nuc_idx]))
+                # print('erratic decoded segment', ''.join([NUC_VOCAB[idx] for idx in decoded_nuc_idx]))
                 return None
 
         return hidden_state, decoded_nuc_idx, last_token, graph_latent_vec
@@ -669,16 +674,16 @@ class UnifiedDecoder(nn.Module):
         pseudo_node = RNAJTNode('P', [])
         pseudo_node.idx = 0
         stack = [(pseudo_node, None, None)]
-        zero_pad = torch.zeros(1, 1, self.hidden_size).to(device)
+        zero_pad = torch.zeros(1, 1, self.hidden_size).to(self.device)
 
         # Root Prediction
         tree_latent_vec = torch.cat([
             tree_latent_vec,
-            torch.zeros(1, self.hidden_size - self.latent_size).to(device)], dim=1)
+            torch.zeros(1, self.hidden_size - self.latent_size).to(self.device)], dim=1)
         if self.decode_nuc_with_lstm:
             graph_latent_vec = torch.cat([
                 graph_latent_vec,
-                torch.zeros(1, self.hidden_size - self.latent_size).to(device)], dim=1)
+                torch.zeros(1, self.hidden_size - self.latent_size).to(self.device)], dim=1)
         root_hpn_pred_score = self.aggregate(tree_latent_vec, 'word_hpn')
 
         # we can basically decode anything at the first non pseudo root node
@@ -691,7 +696,7 @@ class UnifiedDecoder(nn.Module):
         root = RNAJTNode(HYPERGRAPH_VOCAB[root_label_idx], [], neighbors=[pseudo_node])
         root.idx = 1
         pseudo_node.neighbors.append(root)
-        stack.append((root, torch.zeros(1, len(NUC_VOCAB)).to(device), 0))
+        stack.append((root, torch.zeros(1, len(NUC_VOCAB)).to(self.device), 0))
         root.decoded_segment = []
         h = {(0, 1): tree_latent_vec}
         all_nodes = [pseudo_node, root]
@@ -707,7 +712,7 @@ class UnifiedDecoder(nn.Module):
                 node_incoming_msg = zero_pad
 
             hpn_label = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
-            hpn_label = torch.as_tensor(hpn_label).to(device).view(1, len(HYPERGRAPH_VOCAB))
+            hpn_label = torch.as_tensor(hpn_label).to(self.device).view(1, len(HYPERGRAPH_VOCAB))
 
             node_incoming_msg = GraphGRU(hpn_label, node_incoming_msg,
                                          self.W_z_mp, self.W_r_mp, self.U_r_mp, self.W_h_mp)
@@ -738,12 +743,13 @@ class UnifiedDecoder(nn.Module):
                                                            last_token_idx + len(decoded_nuc_idx))))
                 last_token_idx += len(decoded_nuc_idx)
 
-                new_h = hidden_state
+                # new_h = hidden_state
+                new_h = node_incoming_msg
                 hpn_pred_score = self.aggregate(new_h, 'word_hpn')
 
                 mask = (
                     torch.as_tensor(((np.array(allowed_hpn_transition[HYPERGRAPH_VOCAB.index(node_x.hpn_label)]) - 1) *
-                                     99999).astype(np.float32))).to(device)
+                                     99999).astype(np.float32))).to(self.device)
 
                 if prob_decode:
                     hpn_label_idx = torch.multinomial(torch.softmax(hpn_pred_score + mask, dim=1), num_samples=1)
@@ -775,7 +781,8 @@ class UnifiedDecoder(nn.Module):
                 # ready to rollout to the next level
                 last_token_idx += len(decoded_nuc_idx)
 
-                new_h = hidden_state
+                # new_h = hidden_state
+                new_h = node_incoming_msg
                 h[(node_x.idx, node_fa.idx)] = new_h
                 node_fa.neighbors.append(node_x)
                 stack.pop()
