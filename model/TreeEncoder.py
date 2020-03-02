@@ -17,8 +17,11 @@ class TreeEncoder(nn.Module):
         self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.depth = depth
-        self.output_w = nn.Linear(2 * self.hidden_size + len(HYPERGRAPH_VOCAB), self.hidden_size)
-        self.GRU = GraphGRU(hidden_size + HPN_FDIM, hidden_size, depth=depth)
+        self.output_w = nn.Linear(2 * self.hidden_size, self.hidden_size)
+        self.GRU = GraphGRU(hidden_size, hidden_size, depth=depth, **kwargs)
+
+        self.jt_order_lstm = torch.nn.LSTM(hidden_size + HPN_FDIM, hidden_size // 2, bidirectional=True, batch_first=True)
+        # bidirectional hence hidden_size//2
 
     def send_to_device(self, *args):
         ret = []
@@ -33,8 +36,30 @@ class TreeEncoder(nn.Module):
         f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).sum(dim=1)  # [nb_nodes, hidden_size]
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
+        ''' bilstm to add order information into the learnt node embeddings '''
+        all_len = list(np.array(scope)[:, 1])  # minus the pseudo
+        max_len = max(all_len)
+        all_pre_padding_idx = np.concatenate(
+            [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)]).astype(np.long)
+
+        batch_jt_vec = []
+        for start_idx, length in scope:
+            batch_jt_vec.append(f_node[start_idx: start_idx + length])  # skip the pseudo node
+
+        # [batch_size, max_len, hidden_size]
+        padded_jt_vec = nn.utils.rnn.pad_sequence(batch_jt_vec, batch_first=True)
+        packed_jt_vec = nn.utils.rnn.pack_padded_sequence(
+            padded_jt_vec, all_len, enforce_sorted=False, batch_first=True)
+
+        output, _ = self.jt_order_lstm(packed_jt_vec)
+
+        padded_jt_emb = nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[0]
+        f_node = padded_jt_emb.view(-1, self.hidden_size). \
+            index_select(0, torch.as_tensor(all_pre_padding_idx).to(self.device))
+
+        ''' begin tree messages iteration'''
         messages = torch.zeros(message_graph.size(0), self.hidden_size).to(self.device)
-        f_message = index_select_ND(f_node, 0, f_message)  # [nb_msg, nb_neighbors, hidden_size+4]
+        f_message = index_select_ND(f_node, 0, f_message)  # [nb_msg, nb_neighbors, hidden_size]
         messages = self.GRU(messages, f_message, message_graph)
 
         incoming_msg = index_select_ND(messages, 0, node_graph).sum(1)

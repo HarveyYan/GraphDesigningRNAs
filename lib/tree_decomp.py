@@ -449,6 +449,7 @@ if __name__ == "__main__":
     # rna_struct = "(((...)))..."
 
     adjmat, node_labels, hpn_nodes_assignment = decompose(rna_struct)
+    print(node_labels)
     # print(adjmat.todense())
     # print(list(zip(node_labels, hpn_nodes_assignment)))
     # node_labels = np.array(node_labels).astype('<U15')
@@ -463,8 +464,8 @@ if __name__ == "__main__":
     #
     # draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
 
-    tree = RNAJunctionTree(rna_seq, rna_struct)
-    stack = []
-    dfs(stack, tree.nodes[1], 0)
-    for line in stack:
-        print(line)
+    # tree = RNAJunctionTree(rna_seq, rna_struct)
+    # stack = []
+    # dfs(stack, tree.nodes[1], 0)
+    # for line in stack:
+    #     print(line)

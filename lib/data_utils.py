@@ -80,7 +80,7 @@ if __name__ == "__main__":
     #         is_valid = dfs_nt_traversal_check(tree)
     #         if not is_valid:
     #             print('parsed tree invalid:', ''.join(tree.rna_seq))
-
+    total_batch = 0
     all_length, all_tree_height, all_nb_nodes = [], [], []
     loader = JunctionTreeFolder(os.path.join(basedir, 'data/rna_jt_32-512/train-split'), 32, num_workers=8, shuffle=False)
     for batch in tqdm(loader):
@@ -100,6 +100,39 @@ if __name__ == "__main__":
             all_nb_nodes.append(len(tree.nodes) - 1)
             all_length.append(len(tree.rna_seq))
 
+        total_batch += 1
+
+        if total_batch % 10000 == 0:
+            plt.hist(all_tree_height, bins=1000)
+            plt.xlabel('tree height')
+            plt.ylabel('count')
+            plt.savefig('all-tree-height.jpg', dpi=350)
+            plt.close()
+
+            plt.hist(all_nb_nodes, bins=1000)
+            plt.xlabel('num hypernodes')
+            plt.ylabel('count')
+            plt.savefig('all-nb-nodes.jpg', dpi=350)
+            plt.close()
+
+            unique_length = np.unique(all_length)
+            mean_depth, mean_nb_nodes = [], []
+            for ulen in unique_length:
+                mean_depth.append(np.mean(np.array(all_tree_height)[all_length == ulen]))
+                mean_nb_nodes.append(np.mean(np.array(all_nb_nodes)[all_length == ulen]))
+
+            plt.bar(unique_length, mean_depth)
+            plt.xlabel('sequence length')
+            plt.ylabel('mean tree height')
+            plt.savefig('length-vs-height.jpg', dpi=350)
+            plt.close()
+
+            plt.bar(unique_length, mean_nb_nodes)
+            plt.xlabel('sequence length')
+            plt.ylabel('mean num hypernodes ')
+            plt.savefig('length-vs-nb-nodes.jpg', dpi=350)
+            plt.close()
+
     all_length = np.array(all_length)
     all_tree_height = np.array(all_tree_height)
     all_nb_nodes = np.array(all_nb_nodes)
@@ -108,11 +141,13 @@ if __name__ == "__main__":
     plt.xlabel('tree height')
     plt.ylabel('count')
     plt.savefig('all-tree-height.jpg', dpi=350)
+    plt.close()
 
     plt.hist(all_nb_nodes, bins=1000)
     plt.xlabel('num hypernodes')
     plt.ylabel('count')
     plt.savefig('all-nb-nodes.jpg', dpi=350)
+    plt.close()
 
     unique_length = np.unique(all_length)
     mean_depth, mean_nb_nodes = [], []
@@ -124,10 +159,12 @@ if __name__ == "__main__":
     plt.xlabel('sequence length')
     plt.ylabel('mean tree height')
     plt.savefig('length-vs-height.jpg', dpi=350)
+    plt.close()
 
     plt.bar(unique_length, mean_nb_nodes)
     plt.xlabel('sequence length')
     plt.ylabel('mean num hypernodes ')
     plt.savefig('length-vs-nb-nodes.jpg', dpi=350)
+    plt.close()
 
 

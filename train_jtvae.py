@@ -65,7 +65,7 @@ def compute_recon_acc(tree_batch, graph_vectors, tree_vectors, nb_encode=10, nb_
 
                     posterior_valid[i] += 1
 
-                    if rna.is_mfe or rna.mfe_range < 0.01:
+                    if rna.is_mfe or (rna.mfe_range is not None and rna.mfe_range < 0.01):
                         posterior_stability[i] += 1
 
                     if verbose:
@@ -95,7 +95,7 @@ def compute_recon_acc(tree_batch, graph_vectors, tree_vectors, nb_encode=10, nb_
 
 if __name__ == "__main__":
 
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
     print(args)
