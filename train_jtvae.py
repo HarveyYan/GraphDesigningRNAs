@@ -33,7 +33,6 @@ parser.add_argument('--anneal_rate', type=float, default=0.9)
 parser.add_argument('--anneal_iter', type=int, default=40000)
 parser.add_argument('--kl_anneal_iter', type=int, default=2000)
 parser.add_argument('--print_iter', type=int, default=1000)
-parser.add_argument('--save_iter', type=int, default=10000)
 
 def compute_recon_acc(tree_batch, graph_vectors, tree_vectors, nb_encode=10, nb_decode=10, verbose=False):
     batch_size = len(tree_batch)
@@ -143,7 +142,7 @@ if __name__ == "__main__":
             nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
             optimizer.step()
 
-            meters = meters + np.array([kl_div, all_acc[0] * 100, all_acc[1] * 100, all_acc[2] * 100])
+            meters = meters + np.array([float(kl_div), float(all_acc[0]) * 100, float(all_acc[1]) * 100, float(all_acc[2]) * 100])
 
             if total_step % args.print_iter == 0:
                 meters /= args.print_iter
@@ -158,9 +157,6 @@ if __name__ == "__main__":
 
             lib.plot.tick()
 
-            if total_step % args.save_iter == 0:
-                torch.save(model.state_dict(), os.path.join(save_dir, "model.iter-" + str(total_step)))
-
             if total_step % args.anneal_iter == 0:
                 scheduler.step()
                 print("learning rate: %.6f" % scheduler.get_lr()[0])
@@ -168,13 +164,16 @@ if __name__ == "__main__":
             if total_step % args.kl_anneal_iter == 0 and total_step >= args.warmup:
                 beta = min(args.max_beta, beta + args.step_beta)
 
+        # save model at the end of each epoch
+        torch.save(model.state_dict(), os.path.join(save_dir, "model.epoch-" + str(epoch + 1)))
+
         del loader
 
         # validation step
         print('End of epoch %d,' % (epoch), 'starting validation')
         loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', args.batch_size, num_workers=8)
         valid_kl, valid_node_acc, valid_nuc_acc, valid_topo_acc = 0., 0., 0., 0.
-        recon_acc, post_valid, post_stab = 0., 0., 0.
+        # recon_acc, post_valid, post_stab = 0., 0., 0.
         size = 0
         for batch in loader:
             size += len(batch)
@@ -197,22 +196,22 @@ if __name__ == "__main__":
             valid_nuc_acc += float(all_acc[1])
             valid_topo_acc += float(all_acc[2])
 
-            # reconstruction_acc_measure
-            batch_recon_acc, batch_post_valid, batch_post_stability = \
-                compute_recon_acc(tree_batch, graph_vectors, tree_vectors, nb_encode=10, nb_decode=10)
-
-            recon_acc += np.sum(batch_recon_acc)
-            post_valid += np.sum(batch_post_valid)
-            post_stab += np.sum(batch_post_stability)
+            # # reconstruction_acc_measure
+            # batch_recon_acc, batch_post_valid, batch_post_stability = \
+            #     compute_recon_acc(tree_batch, graph_vectors, tree_vectors, nb_encode=10, nb_decode=10)
+            #
+            # recon_acc += np.sum(batch_recon_acc)
+            # post_valid += np.sum(batch_post_valid)
+            # post_stab += np.sum(batch_post_stability)
 
 
         lib.plot.plot('validation_kl', valid_kl / size)
         lib.plot.plot('validation_node_acc', valid_node_acc / size * 100)
         lib.plot.plot('validation_nuc_acc', valid_nuc_acc / size * 100)
         lib.plot.plot('validation_topo_acc', valid_topo_acc / size * 100)
-        lib.plot.plot('validation_reconstruction_acc', recon_acc / size)
-        lib.plot.plot('validation_posterior_validity', post_valid / size)
-        lib.plot.plot('validation_posterior_stability', post_stab / size)
+        # lib.plot.plot('validation_reconstruction_acc', recon_acc / size)
+        # lib.plot.plot('validation_posterior_validity', post_valid / size)
+        # lib.plot.plot('validation_posterior_stability', post_stab / size)
 
         lib.plot.flush()
 
