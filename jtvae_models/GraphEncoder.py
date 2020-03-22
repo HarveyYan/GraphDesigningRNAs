@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import forgi.graph.bulge_graph as fgb
 import numpy as np
-from lib.nnutils import index_select_ND
+from lib.nn_utils import index_select_ND
 
 NUC_VOCAB = ['A', 'C', 'G', 'U']
 NUC_FDIM = 4

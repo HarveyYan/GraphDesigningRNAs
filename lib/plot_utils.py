@@ -38,6 +38,8 @@ _since_beginning = collections.defaultdict(lambda: {})
 _since_last_flush = collections.defaultdict(lambda: {})
 
 _iter = [0]
+_xlabel = ['iterations']
+_ticker_registry = collections.defaultdict(lambda: {})
 
 _output_dir = ''
 _stdout = True
@@ -53,15 +55,39 @@ def set_output_dir(output_dir):
     _output_dir = output_dir
 
 
-def tick():
-    _iter[0] += 1
-
-
-def plot(name, value):
-    if type(value) is tuple:
-        _since_last_flush[name][_iter[0]] = np.array(value)
+def set_xlabel_for_tick(index, label):
+    global _xlabel
+    if len(_xlabel) <= index:
+        raise RuntimeWarning('plot_utils.py: xlabels doesn\'t have index %d' % (index))
     else:
-        _since_last_flush[name][_iter[0]] = value
+        _xlabel[index] = label
+
+
+def _enlarger_ticker(index):
+    if len(_iter) > index:
+        return
+    _iter.extend([0] * (index + 1 - len(_iter)))
+    _xlabel.extend(['iterations'] * (index + 1 - len(_xlabel)))
+
+
+def tick(index=0):
+    if len(_iter) <= index:
+        _enlarger_ticker(index)
+    _iter[index] += 1
+
+
+def plot(name, value, index=0):
+    if len(_iter) <= index:
+        _enlarger_ticker(index)
+    if name in _ticker_registry:
+        if _ticker_registry[name] != index:
+            raise ValueError('%s is not registered with the %d ticker!' % (name, index))
+    else:
+        _ticker_registry[name] = index
+    if type(value) is tuple:
+        _since_last_flush[name][_iter[index]] = np.array(value)
+    else:
+        _since_last_flush[name][_iter[index]] = value
 
 
 def flush():
@@ -73,19 +99,19 @@ def flush():
 
         x_vals = np.sort(list(_since_beginning[name].keys()))
         y_vals = np.array([_since_beginning[name][x] for x in x_vals])
-
+        index = _ticker_registry[name]
         plt.clf()
         if len(y_vals.shape) == 1:
             plt.plot(x_vals, y_vals)
         else:  # with standard deviation
             plt.plot(x_vals, y_vals[:, 0])
             plt.fill_between(x_vals, y_vals[:, 0] - y_vals[:, 1], y_vals[:, 0] + y_vals[:, 1], alpha=0.5)
-        plt.xlabel('iteration')
+        plt.xlabel(_xlabel[index])
         plt.ylabel(name)
-        plt.savefig(os.path.join(_output_dir, name.replace(' ', '_') + '.jpg'), dpi=350)
+        plt.savefig(os.path.join(_output_dir, name.replace(' ', '_') + '.png'), dpi=350)
 
     if _stdout:
-        print("iteration {}\t{}".format(_iter[0], "\t".join(prints)))
+        print("iteration {}\t{}".format(_iter[index], "\t".join(prints)))
     _since_last_flush.clear()
 
 
@@ -95,6 +121,8 @@ def reset():
     _since_last_flush = collections.defaultdict(lambda: {})
 
     _iter = [0]
+    _xlabel = [0]
+    _ticker_registry = collections.defaultdict(lambda: {})
 
     _output_dir = ''
     _stdout = True

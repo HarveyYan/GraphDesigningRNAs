@@ -9,9 +9,10 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 
-from model.VAE import JunctionTreeVAE
+from jtvae_models.VAE import JunctionTreeVAE
 from lib.data_utils import JunctionTreeFolder
-import lib.plot
+import lib.plot_utils
+from lib.gpu_memory_log import gpu_memory_log
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--save_dir', required=True)
@@ -26,12 +27,9 @@ parser.add_argument('--clip_norm', type=float, default=50.0)
 parser.add_argument('--beta', type=float, default=0.0)
 parser.add_argument('--step_beta', type=float, default=0.002)
 parser.add_argument('--max_beta', type=float, default=1.0)
-parser.add_argument('--warmup', type=int, default=40000)
 
 parser.add_argument('--epoch', type=int, default=10)
-parser.add_argument('--anneal_rate', type=float, default=0.9)
-parser.add_argument('--anneal_iter', type=int, default=40000)
-parser.add_argument('--kl_anneal_iter', type=int, default=2000)
+# parser.add_argument('--anneal_rate', type=float, default=0.9)
 parser.add_argument('--print_iter', type=int, default=1000)
 
 def compute_recon_acc(tree_batch, graph_vectors, tree_vectors, nb_encode=10, nb_decode=10, verbose=False):
@@ -114,7 +112,7 @@ if __name__ == "__main__":
     print("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
+    # scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
 
     param_norm = lambda m: math.sqrt(sum([p.norm().item() ** 2 for p in m.parameters()]))
     grad_norm = lambda m: math.sqrt(sum([p.grad.norm().item() ** 2 for p in m.parameters() if p.grad is not None]))
@@ -129,8 +127,10 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    lib.plot.set_output_dir(save_dir)
-    lib.plot.suppress_stdout()
+    lib.plot_utils.set_output_dir(save_dir)
+    lib.plot_utils.suppress_stdout()
+
+    # model.load_state_dict(torch.load('/home/zichao/scratch/JTRNA/output/20200310-192540-dim-64-corrected-encoders-bilstm-pooling/model.epoch-1'))
 
     for epoch in range(args.epoch):
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=8)
@@ -139,7 +139,7 @@ if __name__ == "__main__":
             model.zero_grad()
             loss, kl_div, all_acc = model(batch, beta)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
+            # nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
             optimizer.step()
 
             meters = meters + np.array([float(kl_div), float(all_acc[0]) * 100, float(all_acc[1]) * 100, float(all_acc[2]) * 100])
@@ -148,21 +148,20 @@ if __name__ == "__main__":
                 meters /= args.print_iter
                 print("[%d] Beta: %.3f, KL: %.2f, Node: %.2f, Nucleotide: %.2f, Topo: %.2f, PNorm: %.2f, GNorm: %.2f" % (
                 total_step, beta, meters[0], meters[1], meters[2], meters[3], param_norm(model), grad_norm(model)))
-                lib.plot.plot('node acc', meters[1])
-                lib.plot.plot('nucleotide acc', meters[2])
-                lib.plot.plot('topo acc', meters[3])
-                lib.plot.flush()
+                lib.plot_utils.plot('node acc', meters[1], index=0)
+                lib.plot_utils.plot('nucleotide acc', meters[2], index=0)
+                lib.plot_utils.plot('topo acc', meters[3], index=0)
+                lib.plot_utils.flush()
                 sys.stdout.flush()
                 meters *= 0
 
-            lib.plot.tick()
+            lib.plot_utils.tick(index=0)
+            del loss, kl_div, all_acc
 
-            if total_step % args.anneal_iter == 0:
-                scheduler.step()
-                print("learning rate: %.6f" % scheduler.get_lr()[0])
+        # scheduler.step(epoch)
+        # print("learning rate: %.6f" % scheduler.get_lr()[0])
 
-            if total_step % args.kl_anneal_iter == 0 and total_step >= args.warmup:
-                beta = min(args.max_beta, beta + args.step_beta)
+        beta = min(args.max_beta, beta + args.step_beta)
 
         # save model at the end of each epoch
         torch.save(model.state_dict(), os.path.join(save_dir, "model.epoch-" + str(epoch + 1)))
@@ -176,7 +175,7 @@ if __name__ == "__main__":
         # recon_acc, post_valid, post_stab = 0., 0., 0.
         size = 0
         for batch in loader:
-            size += len(batch)
+            size += 1
 
             tree_batch, graph_encoder_input, tree_encoder_input = batch
             graph_vectors, tree_vectors, enc_tree_messages = \
@@ -205,14 +204,15 @@ if __name__ == "__main__":
             # post_stab += np.sum(batch_post_stability)
 
 
-        lib.plot.plot('validation_kl', valid_kl / size)
-        lib.plot.plot('validation_node_acc', valid_node_acc / size * 100)
-        lib.plot.plot('validation_nuc_acc', valid_nuc_acc / size * 100)
-        lib.plot.plot('validation_topo_acc', valid_topo_acc / size * 100)
+        lib.plot_utils.plot('validation_kl', valid_kl / size, index=1)
+        lib.plot_utils.plot('validation_node_acc', valid_node_acc / size * 100, index=1)
+        lib.plot_utils.plot('validation_nuc_acc', valid_nuc_acc / size * 100, index=1)
+        lib.plot_utils.plot('validation_topo_acc', valid_topo_acc / size * 100, index=1)
         # lib.plot.plot('validation_reconstruction_acc', recon_acc / size)
         # lib.plot.plot('validation_posterior_validity', post_valid / size)
         # lib.plot.plot('validation_posterior_stability', post_stab / size)
 
-        lib.plot.flush()
+        lib.plot_utils.flush()
+        lib.plot_utils.tick(index=1)
 
         del loader

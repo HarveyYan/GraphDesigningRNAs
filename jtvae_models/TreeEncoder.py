@@ -3,7 +3,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from lib.nnutils import index_select_ND
+import scipy.sparse as sp
+import networkx as nx
+from lib.nn_utils import index_select_ND
 from lib.tree_decomp import get_tree_height
 
 HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
@@ -30,11 +32,11 @@ class TreeEncoder(nn.Module):
             ret.append(item.to(self.device))
         return ret
 
-    def forward(self, nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, depth):
+    def forward(self, nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, diameter):
         nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
             self.send_to_device(nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph)
-        max_depth = max(depth)
-        nuc_emb = torch.cat([nuc_emebedding, torch.zeros(1, nuc_emebedding.size(1)).to(self.device)], dim=0)
+        max_diameter = max(diameter)
+        nuc_emb = torch.cat([nuc_emebedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
         f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).sum(dim=1)  # [nb_nodes, hidden_size]
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
@@ -63,8 +65,10 @@ class TreeEncoder(nn.Module):
 
         ''' begin tree messages iteration'''
         messages = torch.zeros(message_graph.size(0), self.hidden_size).to(self.device)
-        f_message = index_select_ND(f_node, 0, f_message)  # [nb_msg, nb_neighbors, hidden_size]
-        messages = self.GRU(messages, f_message, message_graph, max_depth * 2)  # bottom-up and top-down phases
+        f_message = index_select_ND(
+            torch.cat([f_node, torch.zeros(1, HPN_FDIM + self.hidden_size).to(self.device)], dim=0),
+            0, f_message)  # [nb_msg, nb_neighbors, hidden_size]
+        messages = self.GRU(messages, f_message, message_graph, max_diameter)  # bottom-up and top-down phases
 
         incoming_msg = index_select_ND(messages, 0, node_graph).sum(1)
         hpn_embedding = torch.relu(self.output_w(torch.cat([f_node, incoming_msg], dim=-1)))
@@ -106,7 +110,7 @@ class TreeEncoder(nn.Module):
     @staticmethod
     def prepare_batch_data(rna_tree_batch):
         scope = []
-        depth = []
+        diameter = []
 
         messages, message_dict = [None], {}
         f_node_label = []
@@ -116,8 +120,12 @@ class TreeEncoder(nn.Module):
         graph_nuc_offset = 0
 
         for tree in rna_tree_batch:
-            depth.append(get_tree_height(np.array(tree.hp_adjmat.todense())))
-            for node in tree.nodes:
+            # depth.append(get_tree_height(np.array(tree.hp_adjmat.todense())))
+            # graph diameter
+            diameter.append(nx.diameter(nx.from_scipy_sparse_matrix(tree.hp_adjmat)))
+            depth_first_order = sp.csgraph.depth_first_order(
+                tree.hp_adjmat, i_start=0, directed=False, return_predecessors=False)
+            for node in np.array(tree.nodes)[depth_first_order]:
                 onehot_enc = np.array(list(map(lambda x: x == node.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
                 f_node_label.append(torch.as_tensor(onehot_enc))
 
@@ -148,7 +156,7 @@ class TreeEncoder(nn.Module):
         total_messages = len(messages)
         node_graph = [[] for i in range(total_nodes)]
         message_graph = [[] for i in range(total_messages)]
-        f_message = [0] * len(messages)
+        f_message = [total_nodes] * total_messages
 
         for node_from, node_to, tree_node_offset in messages[1:]:
             msg_idx = message_dict[(node_from.idx + tree_node_offset, node_to.idx + tree_node_offset)]
@@ -183,7 +191,7 @@ class TreeEncoder(nn.Module):
         f_node_assignment = torch.as_tensor(np.array(f_node_assignment, dtype=np.long))
         f_message = torch.as_tensor(np.array(f_message, dtype=np.long))
 
-        return f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, depth
+        return f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, diameter
 
 
 class GraphGRU(nn.Module):

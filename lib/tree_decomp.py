@@ -449,20 +449,27 @@ if __name__ == "__main__":
     # rna_struct = "(((...)))..."
 
     adjmat, node_labels, hpn_nodes_assignment = decompose(rna_struct)
-    print(node_labels)
+    # depth_first_order = sp.csgraph.depth_first_order(
+    #     adjmat, i_start=0, directed=False, return_predecessors=False)
+    # print(list(np.array(hpn_nodes_assignment)[depth_first_order]))
+    # print(node_labels)
     # print(adjmat.todense())
     # print(list(zip(node_labels, hpn_nodes_assignment)))
-    # node_labels = np.array(node_labels).astype('<U15')
-    # node_labels[node_labels == 'S'] = "Stem"
-    # # node_labels[node_labels == 'F'] = "Dangling Start"
-    # # node_labels[node_labels == 'T'] = "Dangling End"
-    # node_labels[node_labels == 'M'] = "Multiloop"
-    # node_labels[node_labels == 'H'] = "Hairpin"
-    # node_labels[node_labels == 'I'] = "Internal loop"
+    node_labels = np.array(node_labels).astype('<U15')
+    node_labels[node_labels == 'S'] = "Stem"
+    # node_labels[node_labels == 'F'] = "Dangling Start"
+    # node_labels[node_labels == 'T'] = "Dangling End"
+    node_labels[node_labels == 'M'] = "Multiloop"
+    node_labels[node_labels == 'H'] = "Hairpin"
+    node_labels[node_labels == 'I'] = "Internal loop"
     # print(node_labels)
-    # from lib.plot import draw_graph
+    from lib.plot_utils import draw_graph
     #
-    # draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
+    draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
+
+    import networkx as nx
+
+    print(nx.diameter(nx.from_numpy_array(adjmat.todense())))
 
     # tree = RNAJunctionTree(rna_seq, rna_struct)
     # stack = []

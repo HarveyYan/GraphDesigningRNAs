@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 
-from model.GraphEncoder import GraphEncoder
-from model.TreeEncoder import TreeEncoder
-from model.Decoder import UnifiedDecoder
+from jtvae_models.GraphEncoder import GraphEncoder
+from jtvae_models.TreeEncoder import TreeEncoder
+from jtvae_models.Decoder import UnifiedDecoder
 
 class JunctionTreeVAE(nn.Module):
 

@@ -9,8 +9,8 @@ basedir = os.path.split(os.path.dirname(os.path.abspath(__file__)))[0]
 sys.path.append(basedir)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from model.TreeEncoder import TreeEncoder
-from model.GraphEncoder import GraphEncoder
+from jtvae_models.TreeEncoder import TreeEncoder
+from jtvae_models.GraphEncoder import GraphEncoder
 
 
 class JunctionTreeFolder:
