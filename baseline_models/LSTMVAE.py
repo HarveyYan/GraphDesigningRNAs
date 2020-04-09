@@ -7,6 +7,7 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import pickle
 import random
+from scipy.stats import pearsonr
 
 basedir = os.path.split(os.path.dirname(os.path.abspath(__file__)))[0]
 sys.path.append(basedir)
@@ -23,6 +24,7 @@ FDIM_JOINT_VOCAB = len(JOINT_VOCAB)
 FDIM_JOINT_VOCAB_DECODING = FDIM_JOINT_VOCAB + 1  # 1 extra dimension for the stop symbol
 MAX_DECODE_LENGTH = 1000
 MIN_HAIRPIN_LEN = 3
+MAX_FE = 0.85
 
 allowed_basepairs = [[False, False, False, True],
                      [False, False, True, False],
@@ -48,7 +50,7 @@ class BasicLSTMVAEFolder:
             if self.shuffle:
                 random.shuffle(data)
 
-            batches = [[(''.join(rna.rna_seq), ''.join(rna.rna_struct))
+            batches = [[(''.join(rna.rna_seq), ''.join(rna.rna_struct), rna.free_energy)
                         for rna in data[i: i + self.batch_size]]
                        for i in range(0, len(data), self.batch_size)]
             if len(batches[-1]) < self.batch_size:
@@ -75,7 +77,8 @@ class LSTMBaselineDataset(Dataset):
     def __getitem__(self, idx):  # joint encoding of the structure and sequence
         all_joint_encoding = []
         all_label = []
-        for seq, struct in self.data[idx]:
+        all_free_energy = []
+        for seq, struct, free_energy in self.data[idx]:
             joint_encoding = []
             label = []
             for seq_char, struct_char in zip(seq, struct):
@@ -84,7 +87,8 @@ class LSTMBaselineDataset(Dataset):
                 label.append(np.argmax(onehot_enc))
             all_joint_encoding.append(joint_encoding)
             all_label.append(label)
-        return self.data[idx], all_joint_encoding, all_label
+            all_free_energy.append(np.abs(free_energy / len(seq)) / MAX_FE)  # length normalized minimum free energy
+        return self.data[idx], all_joint_encoding, all_label, all_free_energy
 
 
 class LSTMEncoder(nn.Module):
@@ -355,6 +359,9 @@ class LSTMVAE(nn.Module):
         self.var = nn.Linear(2 * hidden_size, latent_size)
 
         self.decoder = LSTMDecoder(self.hidden_size, self.latent_size, **kwargs)
+        self.regressor_nonlinear = nn.Linear(2 * hidden_size, hidden_size)
+        self.regressor_output = nn.Linear(hidden_size, 1)
+        self.normed_fe_loss = nn.BCEWithLogitsLoss(reduction='sum')
 
     def encode(self, sequence_batch):
         latent_vec = self.encoder(sequence_batch)
@@ -369,13 +376,27 @@ class LSTMVAE(nn.Module):
         z_vecs = z_mean + torch.exp(z_log_var / 2) * epsilon
         return z_vecs, kl_loss
 
-    def forward(self, sequence_batch, sequence_label, beta):
+
+    def aux_regressor(self, latent_vec, fe_target):
+        batch_size = len(fe_target)
+        predicted_fe = self.regressor_output(self.regressor_nonlinear(latent_vec))[:, 0]
+        normed_fe_loss = self.normed_fe_loss(
+            predicted_fe,
+            torch.as_tensor(np.array(fe_target, dtype=np.float32)).to(self.device)) \
+                         / batch_size
+        normed_fe_corr = pearsonr(predicted_fe.cpu().detach().numpy(), fe_target)[0]
+        return normed_fe_loss, normed_fe_corr
+
+
+    def forward(self, sequence_batch, sequence_label, fe_target, beta):
         latent_vec = self.encode(sequence_batch)
+
+        normed_fe_loss, normed_fe_corr = self.aux_regressor(latent_vec, fe_target)
 
         latent_vec, kl_loss = self.rsample(latent_vec)
 
         nuc_pred_loss, stop_symbol_acc, nuc_pred_acc, struct_pred_acc, all_acc = \
             self.decoder(sequence_batch, latent_vec, sequence_label)
 
-        return nuc_pred_loss + beta * kl_loss, kl_loss, \
-               (stop_symbol_acc, nuc_pred_acc, struct_pred_acc, all_acc)
+        return nuc_pred_loss + 0.1 * normed_fe_loss + beta * kl_loss, kl_loss, normed_fe_loss, \
+               (normed_fe_corr, stop_symbol_acc, nuc_pred_acc, struct_pred_acc, all_acc)
