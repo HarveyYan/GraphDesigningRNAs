@@ -11,7 +11,7 @@ from tqdm import trange
 import torch.optim.lr_scheduler as lr_scheduler
 from multiprocessing import Pool
 
-from baseline_models.LSTMVAE import LSTMVAE, BasicLSTMVAEFolder
+from baseline_models.GraphLSTMVAE import GraphLSTMVAE, BasicGraphLSTMVAEFolder
 import lib.plot_utils
 import baseline_models.baseline_metrics
 from baseline_models.baseline_metrics import evaluate_posterior, evaluate_prior
@@ -21,7 +21,7 @@ parser.add_argument('--save_dir', required=True)
 parser.add_argument('--hidden_size', type=int, default=450)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--latent_size', type=int, default=56)
-parser.add_argument('--depth', type=int, default=2)
+parser.add_argument('--depth', type=int, default=10)
 
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--clip_norm', type=float, default=50.0)
@@ -36,12 +36,12 @@ parser.add_argument('--print_iter', type=int, default=1000)
 
 if __name__ == "__main__":
 
-    device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
     print(args)
 
-    model = LSTMVAE(args.hidden_size, args.latent_size, args.depth,
+    model = GraphLSTMVAE(args.hidden_size, args.latent_size, args.depth,
                     device=device, use_attention=True, nb_heads=4).to(device)
     print(model)
     for param in model.parameters():
@@ -75,14 +75,14 @@ if __name__ == "__main__":
 
     for epoch in range(args.epoch):
 
-        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4)
+        loader = BasicGraphLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4)
 
         # training iterations
         for batch in loader:
-            original_data, batch_sequence, batch_label, batch_fe = batch
+            original_data, batch_sequence, batch_label, batch_fe, batch_graph_input = batch
             total_step += 1
             model.zero_grad()
-            loss, kl_div, aux_loss, all_acc = model(batch_sequence, batch_label, batch_fe, beta)
+            loss, kl_div, aux_loss, all_acc = model(batch_sequence, batch_label, batch_fe, batch_graph_input, beta)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
             optimizer.step()
@@ -122,7 +122,7 @@ if __name__ == "__main__":
         print('End of epoch %d,' % (epoch), 'starting validation')
 
         valid_batch_size = 128
-        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=2)
+        loader = BasicGraphLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=2)
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
         max_iters = min(50, nb_iters)  # for efficiency
         recon_acc, post_valid, post_fe_deviation = 0, 0, 0.
@@ -138,8 +138,8 @@ if __name__ == "__main__":
             for i in bar:
                 if i >= max_iters:
                     break
-                original_data, batch_sequence, batch_label, batch_fe = next(loader)
-                latent_vec = model.encode(batch_sequence)
+                original_data, batch_sequence, batch_label, batch_fe, batch_graph_input = next(loader)
+                latent_vec = model.encode(batch_graph_input)
 
                 batch_recon_acc, batch_post_valid, batch_post_fe_deviation = \
                     evaluate_posterior(list(np.array(original_data)[:, 0]), list(np.array(original_data)[:, 1]), latent_vec,
