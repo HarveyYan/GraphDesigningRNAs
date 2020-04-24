@@ -3,6 +3,7 @@ import sys
 import pickle
 import os
 import random
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 basedir = os.path.split(os.path.dirname(os.path.abspath(__file__)))[0]
@@ -10,18 +11,20 @@ sys.path.append(basedir)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from jtvae_models.TreeEncoder import TreeEncoder
+from jtvae_models.OrderedTreeEncoder import OrderedTreeEncoder
 from jtvae_models.GraphEncoder import GraphEncoder
 
 
 class JunctionTreeFolder:
 
     # data loading entry
-    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True):
+    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True, **kwargs):
         self.data_folder = data_folder
         self.data_files = [fn for fn in os.listdir(data_folder)]
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle
+        self.tree_encoder_arch = kwargs.get('tree_encoder_arch', 'baseline')
 
     def __iter__(self):
         for fn in self.data_files:
@@ -31,12 +34,13 @@ class JunctionTreeFolder:
 
             if self.shuffle:
                 random.shuffle(data)
+                # data = np.array(data)[np.argsort([len(rna.rna_seq)for rna in data])[::-1]]
 
             batches = [data[i: i + self.batch_size] for i in range(0, len(data), self.batch_size)]
             if len(batches[-1]) < self.batch_size:
                 batches.pop()
 
-            dataset = JunctionTreeDataset(batches)
+            dataset = JunctionTreeDataset(batches, tree_encoder_arch=self.tree_encoder_arch)
             dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=self.num_workers,
                                     collate_fn=lambda x: x[0])
 
@@ -48,17 +52,23 @@ class JunctionTreeFolder:
 
 class JunctionTreeDataset(Dataset):
 
-    def __init__(self, data):
+    def __init__(self, data, **kwargs):
         self.data = data
+        self.tree_encoder_arch = kwargs.get('tree_encoder_arch', 'baseline')
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        return tensorize(self.data[idx])
+        if self.tree_encoder_arch == 'baseline':
+            return tensorize(self.data[idx], TreeEncoder)
+        elif self.tree_encoder_arch == 'ordnuc':
+            return tensorize(self.data[idx], OrderedTreeEncoder)
+        else:
+            raise ValueError('Unknown %s tree encoder architecture' % (self.tree_encoder_arch))
 
 
-def tensorize(tree_batch):
+def tensorize(tree_batch, TreeEncoder):
     graph_encoder_input = GraphEncoder.prepare_batch_data([(tree.rna_seq, tree.rna_struct) for tree in tree_batch])
     tree_encoder_input = TreeEncoder.prepare_batch_data(tree_batch)
 
@@ -82,7 +92,8 @@ if __name__ == "__main__":
     #             print('parsed tree invalid:', ''.join(tree.rna_seq))
     total_batch = 0
     all_length, all_tree_height, all_nb_nodes = [], [], []
-    loader = JunctionTreeFolder(os.path.join(basedir, 'data/rna_jt_32-512/train-split'), 32, num_workers=8, shuffle=False)
+    loader = JunctionTreeFolder(os.path.join(basedir, 'data/rna_jt_32-512/train-split'), 32, num_workers=8,
+                                shuffle=False)
     for batch in tqdm(loader):
         tree_batch, graph_encoder_input, tree_encoder_input = batch
         f_nuc, f_bond, node_graph, message_graph, scope = graph_encoder_input
@@ -166,5 +177,3 @@ if __name__ == "__main__":
     plt.ylabel('mean num hypernodes ')
     plt.savefig('length-vs-nb-nodes.jpg', dpi=350)
     plt.close()
-
-

@@ -448,13 +448,18 @@ if __name__ == "__main__":
     # rna_seq = 'A' * 12
     # rna_struct = "(((...)))..."
 
+    tree = RNAJunctionTree(rna_seq, rna_struct)
+    print([node.hpn_label for node in tree.nodes[2].neighbors])
+    exit()
+
     adjmat, node_labels, hpn_nodes_assignment = decompose(rna_struct)
-    # depth_first_order = sp.csgraph.depth_first_order(
-    #     adjmat, i_start=0, directed=False, return_predecessors=False)
-    # print(list(np.array(hpn_nodes_assignment)[depth_first_order]))
+    depth_first_order = sp.csgraph.depth_first_order(
+        adjmat, i_start=0, directed=False, return_predecessors=False)
+    print(list(np.array(hpn_nodes_assignment)[depth_first_order]))
     # print(node_labels)
     # print(adjmat.todense())
-    # print(list(zip(node_labels, hpn_nodes_assignment)))
+    print(list(zip(node_labels, hpn_nodes_assignment)))
+    exit()
     node_labels = np.array(node_labels).astype('<U15')
     node_labels[node_labels == 'S'] = "Stem"
     # node_labels[node_labels == 'F'] = "Dangling Start"

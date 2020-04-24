@@ -46,10 +46,10 @@ def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_
     original_sequence = original_sequence * nb_encode
     original_structure = original_structure * nb_encode
     batch_idx = batch_idx * nb_encode
-    to_encode_latent = torch.cat([latent_vector] * nb_encode, dim=0)
 
     # batch_size x nb_encode
-    sampled_latent, _ = model.rsample(to_encode_latent)
+    sampled_latent, _ = model.rsample(latent_vector, nsamples=nb_encode)
+    sampled_latent = sampled_latent.transpose(0, 1).reshape(batch_size * nb_encode, -1)
 
     original_sequence = original_sequence * nb_decode
     original_structure = original_structure * nb_decode
