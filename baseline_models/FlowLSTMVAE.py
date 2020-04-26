@@ -37,9 +37,14 @@ allowed_basepairs = [[False, False, False, True],
 
 class BasicLSTMVAEFolder:
 
-    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True):
+    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True, limit_data=None):
         self.data_folder = data_folder
-        self.data_files = [fn for fn in os.listdir(data_folder)]
+        self.limit_data = limit_data
+        if self.limit_data:
+            assert type(self.limit_data) is int, '\'limit_data\' should either be None or an integer'
+            self.data_files = [fn for fn in os.listdir(data_folder) if int(fn.split('-')[-1].split('.')[0]) <= self.limit_data]
+        else:
+            self.data_files = [fn for fn in os.listdir(data_folder)]
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle

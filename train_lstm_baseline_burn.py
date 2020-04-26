@@ -32,7 +32,8 @@ parser.add_argument('--max_beta', type=float, default=1.0)
 parser.add_argument('--epoch', type=int, default=10)
 # parser.add_argument('--anneal_rate', type=float, default=0.9)
 parser.add_argument('--print_iter', type=int, default=1000)
-parser.add_argument('--burn_inner_loop_maximum', type=int, default=20)
+parser.add_argument('--burn_iloop_maximum', type=int, default=100)
+parser.add_argument('--burn_iloop_check_freq', type=int, default=15)
 
 if __name__ == "__main__":
 
@@ -95,25 +96,33 @@ if __name__ == "__main__":
     aggressive = True
     best_mi = mi_not_improved = 0
 
-    for epoch in range(args.epoch):
+    print('Loading all training data for quick memory access')
+    all_train_data = []
+    sample_loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size,
+                                       num_workers=4, limit_data=True)
+    for _, burn_batch_sequence, burn_batch_label, burn_batch_fe in sample_loader:
+        all_train_data.append((burn_batch_sequence, burn_batch_label, burn_batch_fe))
+    all_train_data = all_train_data
+    del sample_loader
 
-        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=1)
-        sample_loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4)
+    for epoch in range(1, args.epoch + 1):
+
+        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4, limit_data=True)
+        
         beta = min(args.max_beta, beta + args.step_beta)
         for batch in loader:
             original_data, batch_sequence, batch_label, batch_fe = batch
             total_step += 1
 
             if aggressive:
-                sample_iter = sample_loader.__iter__()
 
                 sub_iter = 1
-                burn_num_words = 0
                 burn_pre_loss = 1e4
                 burn_cur_loss = 0
 
+                all_idx = np.random.choice(range(len(all_train_data)), args.burn_iloop_maximum, False)
                 '''encoder update loop '''
-                while sub_iter < args.burn_inner_loop_maximum:
+                while sub_iter <= args.burn_iloop_maximum:
                     burn_batch_sequence = batch_sequence
                     burn_batch_label = batch_label
                     burn_batch_fe = batch_fe
@@ -132,9 +141,9 @@ if __name__ == "__main__":
                     nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
                     enc_optimizer.step()
 
-                    _, burn_batch_sequence, burn_batch_label, burn_batch_fe = next(sample_iter)
+                    burn_batch_sequence, burn_batch_label, burn_batch_fe = all_idx[sub_iter - 1]
 
-                    if sub_iter % 15 == 0:
+                    if sub_iter % args.burn_iloop_check_freq == 0:
                         burn_cur_loss = burn_cur_loss / sub_iter
                         if burn_pre_loss < burn_cur_loss:
                             break
@@ -142,8 +151,6 @@ if __name__ == "__main__":
                         burn_cur_loss = 0
 
                     sub_iter += 1
-
-                del sample_iter
 
             ''' decoder update '''
             enc_optimizer.zero_grad()
@@ -205,7 +212,7 @@ if __name__ == "__main__":
             {'model_weights': model.state_dict(),
              'enc_opt_weights': enc_optimizer.state_dict(),
              'dec_opt_weights': dec_optimizer.state_dict()},
-            os.path.join(save_dir, "model.epoch-" + str(epoch + 1)))
+            os.path.join(save_dir, "model.epoch-" + str(epoch)))
 
         ''' validation step '''
         print('End of epoch %d,' % (epoch), 'starting validation')
@@ -352,3 +359,5 @@ if __name__ == "__main__":
     if mp_pool is not None:
         mp_pool.close()
         mp_pool.join()
+
+    logger.close()

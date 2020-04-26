@@ -116,7 +116,9 @@ if __name__ == "__main__":
             beta = min(args.max_beta, beta + args.step_beta)
 
         # save model at the end of each epoch
-        torch.save(model.state_dict(), os.path.join(save_dir, "model.epoch-" + str(epoch + 1)))
+        torch.save(
+            {'model_weights': model.state_dict(), 'opt_weights': optimizer.state_dict()},
+            os.path.join(save_dir, "model.epoch-" + str(epoch + 1)))
 
         # validation step
         print('End of epoch %d,' % (epoch), 'starting validation')
@@ -124,7 +126,7 @@ if __name__ == "__main__":
         valid_batch_size = 128
         loader = BasicLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=2)
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
-        max_iters = min(50, nb_iters)  # for efficiency
+        max_iters = min(10, nb_iters)  # for efficiency
         recon_acc, post_valid, post_fe_deviation = 0, 0, 0.
         valid_kl, valid_corr, valid_stop_symbol, \
         valid_nuc_symbol, valid_struct_symbol, valid_all_symbol = 0., 0., 0., 0., 0., 0.
@@ -178,16 +180,16 @@ if __name__ == "__main__":
             lib.plot_utils.plot('Validation_Struct_Symbol', valid_struct_symbol / max_iters * 100, index=1)
             lib.plot_utils.plot('Validation_all_Symbol', valid_all_symbol / max_iters * 100, index=1)
 
-            lib.plot_utils.plot('validation_recon_acc', recon_acc / total * 100, index=1)
-            lib.plot_utils.plot('validation_post_valid', post_valid / total * 100, index=1)
-            lib.plot_utils.plot('validation_post_fe_deviation', post_fe_deviation / post_valid)
+            lib.plot_utils.plot('Validation_recon_acc', recon_acc / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_valid', post_valid / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation', post_fe_deviation / post_valid, index=1)
 
             sampled_latent_prior = torch.as_tensor(np.random.randn(1000, args.latent_size).astype(np.float32)).to(
                 device)
             prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool, enforce_rna_prior=True)
 
-            lib.plot_utils.plot('prior_valid', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
-            lib.plot_utils.plot('prior_fe_deviation', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            lib.plot_utils.plot('Prior_valid', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_fe_deviation', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
             lib.plot_utils.set_xlabel_for_tick(index=1, label='epoch')
             lib.plot_utils.flush()
