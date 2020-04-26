@@ -32,7 +32,7 @@ parser.add_argument('--max_beta', type=float, default=1.0)
 parser.add_argument('--epoch', type=int, default=10)
 # parser.add_argument('--anneal_rate', type=float, default=0.9)
 parser.add_argument('--print_iter', type=int, default=1000)
-parser.add_argument('--warmup_epoch', type=int, default=1)
+parser.add_argument('--burn_inner_loop_maximum', type=int, default=20)
 
 if __name__ == "__main__":
 
@@ -53,14 +53,20 @@ if __name__ == "__main__":
     baseline_models.baseline_metrics.model = model
     print("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    enc_optimizer = optim.Adam(list(model.encoder.parameters()) +
+                               list(model.regressor_nonlinear.parameters()) +
+                               list(model.regressor_output.parameters()) +
+                               list(model.mean.parameters()) +
+                               list(model.var.parameters()) +
+                               list(model.latent_cnf.parameters()), lr=args.lr)
+    dec_optimizer = optim.Adam(model.decoder.parameters(), lr=args.lr)
     # scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
 
     param_norm = lambda m: math.sqrt(sum([p.norm().item() ** 2 for p in m.parameters()]))
     grad_norm = lambda m: math.sqrt(sum([p.grad.norm().item() ** 2 for p in m.parameters() if p.grad is not None]))
 
-    beta = args.beta
     total_step = 0
+    beta = args.beta
     meters = np.zeros(8)
 
     cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -71,33 +77,90 @@ if __name__ == "__main__":
 
     lib.plot_utils.set_output_dir(save_dir)
     lib.plot_utils.suppress_stdout()
-    logger = lib.logger.CSVLogger('run.csv', save_dir,
-                                  ['Epoch', 'Validation_Entropy', 'Validation_Neg_Log_Prior', 'Validation_KL', 'Validation_Correlation',
-                                   'Validation_Stop_Symbol', 'Validation_Nuc_Symbol', 'Validation_Struct_Symbol', 'Validation_all_Symbol',
-                                   'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg', 'Validation_post_fe_deviation_with_reg',
-                                   'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg', 'Validation_post_fe_deviation_no_reg',
-                                   'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg', 'Prior_fe_deviation_no_reg',
-                                   'Validation_mutual_information', 'Validation_NLL_IW_100', 'Validation_active_units'])
 
     mp_pool = Pool(8)
+    logger = lib.logger.CSVLogger('run.csv', save_dir,
+                                  ['Epoch', 'Validation_Entropy', 'Validation_Neg_Log_Prior', 'Validation_KL',
+                                   'Validation_Correlation',
+                                   'Validation_Stop_Symbol', 'Validation_Nuc_Symbol', 'Validation_Struct_Symbol',
+                                   'Validation_all_Symbol',
+                                   'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg',
+                                   'Validation_post_fe_deviation_with_reg',
+                                   'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg',
+                                   'Validation_post_fe_deviation_no_reg',
+                                   'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg',
+                                   'Prior_fe_deviation_no_reg',
+                                   'Validation_mutual_information', 'Validation_NLL_IW_100', 'Validation_active_units'])
 
-    for epoch in range(1, args.epoch + 1):
+    aggressive = True
+    best_mi = mi_not_improved = 0
 
-        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=2)
+    for epoch in range(args.epoch):
+
+        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=1)
+        sample_loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4)
+        beta = min(args.max_beta, beta + args.step_beta)
         for batch in loader:
             original_data, batch_sequence, batch_label, batch_fe = batch
             total_step += 1
 
-            model.zero_grad()
-            ret_dict = model(batch_sequence, batch_label, batch_fe)
+            if aggressive:
+                sample_iter = sample_loader.__iter__()
 
+                sub_iter = 1
+                burn_num_words = 0
+                burn_pre_loss = 1e4
+                burn_cur_loss = 0
+
+                '''encoder update loop '''
+                while sub_iter < args.burn_inner_loop_maximum:
+                    burn_batch_sequence = batch_sequence
+                    burn_batch_label = batch_label
+                    burn_batch_fe = batch_fe
+
+                    enc_optimizer.zero_grad()
+                    dec_optimizer.zero_grad()
+
+                    ret_dict = model(burn_batch_sequence, burn_batch_label, burn_batch_fe)
+
+                    loss = ret_dict['sum_nuc_pred_loss'] / ret_dict['nb_nuc_targets'] + \
+                           0.1 * ret_dict['normed_fe_loss'] + \
+                           beta * (ret_dict['entropy_loss'] + ret_dict['prior_loss'])
+                    burn_cur_loss += loss.item()
+
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
+                    enc_optimizer.step()
+
+                    _, burn_batch_sequence, burn_batch_label, burn_batch_fe = next(sample_iter)
+
+                    if sub_iter % 15 == 0:
+                        burn_cur_loss = burn_cur_loss / sub_iter
+                        if burn_pre_loss < burn_cur_loss:
+                            break
+                        burn_pre_loss = burn_cur_loss
+                        burn_cur_loss = 0
+
+                    sub_iter += 1
+
+                del sample_iter
+
+            ''' decoder update '''
+            enc_optimizer.zero_grad()
+            dec_optimizer.zero_grad()
+
+            ret_dict = model(batch_sequence, batch_label, batch_fe)
             loss = ret_dict['sum_nuc_pred_loss'] / ret_dict['nb_nuc_targets'] + \
-                   0.1 * ret_dict['normed_fe_loss'] + beta * (ret_dict['entropy_loss'] + ret_dict['prior_loss'])
+                   0.1 * ret_dict['normed_fe_loss'] + \
+                   beta * (ret_dict['entropy_loss'] + ret_dict['prior_loss'])
 
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
 
-            optimizer.step()
+            if not aggressive:
+                enc_optimizer.step()
+
+            dec_optimizer.step()
 
             neg_entropy = float(ret_dict['entropy_loss'])
             neg_log_prior = float(ret_dict['prior_loss'])
@@ -137,14 +200,12 @@ if __name__ == "__main__":
         # scheduler.step(epoch)
         # print("learning rate: %.6f" % scheduler.get_lr()[0])
 
-        if epoch >= args.warmup_epoch:
-            beta = min(args.max_beta, beta + args.step_beta)
-
         # save model at the end of each epoch
         torch.save(
             {'model_weights': model.state_dict(),
-             'opt_weights': optimizer.state_dict()},
-            os.path.join(save_dir, "model.epoch-" + str(epoch)))
+             'enc_opt_weights': enc_optimizer.state_dict(),
+             'dec_opt_weights': dec_optimizer.state_dict()},
+            os.path.join(save_dir, "model.epoch-" + str(epoch + 1)))
 
         ''' validation step '''
         print('End of epoch %d,' % (epoch), 'starting validation')
@@ -246,7 +307,8 @@ if __name__ == "__main__":
             prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=True)
             lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
-            lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid),
+                                index=1)
 
             prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=False)
@@ -278,8 +340,15 @@ if __name__ == "__main__":
             lib.plot_utils.flush()
             lib.plot_utils.tick(index=1)
 
+            if aggressive:
+                if cur_mi - best_mi < 0:
+                    mi_not_improved += 1
+                    if mi_not_improved == 5:
+                        aggressive = False
+                        print("STOP BURNING")
+                else:
+                    best_mi = cur_mi
+
     if mp_pool is not None:
         mp_pool.close()
         mp_pool.join()
-
-    logger.close()

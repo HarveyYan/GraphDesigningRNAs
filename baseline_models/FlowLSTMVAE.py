@@ -374,33 +374,37 @@ class LSTMVAE(nn.Module):
         self.hidden_size = hidden_size
         self.latent_size = latent_size
         self.depthEncoder = depthEncoder
+        self.use_aux_regressor = kwargs.get('use_aux_regressor', True)
+        self.use_flow_prior = kwargs.get('use_flow_prior', True)
 
         self.encoder = LSTMEncoder(self.hidden_size, self.depthEncoder, **kwargs)
         self.mean = nn.Linear(2 * hidden_size, latent_size)
         self.var = nn.Linear(2 * hidden_size, latent_size)
 
         self.decoder = LSTMDecoder(self.hidden_size, self.latent_size, **kwargs)
-        self.regressor_nonlinear = nn.Linear(2 * hidden_size, hidden_size)
-        self.regressor_output = nn.Linear(hidden_size, 1)
-        self.normed_fe_loss = nn.BCEWithLogitsLoss(reduction='sum')
+        if self.use_aux_regressor:
+            self.regressor_nonlinear = nn.Linear(2 * hidden_size, hidden_size)
+            self.regressor_output = nn.Linear(hidden_size, 1)
+            self.normed_fe_loss = nn.BCEWithLogitsLoss(reduction='sum')
 
-        self.flow_args = {
-            'latent_dims': "256-256",
-            'latent_num_blocks': 1,
-            'zdim': latent_size,
-            'layer_type': 'concatsquash',
-            'nonlinearity': 'tanh',
-            'time_length': 0.5,
-            'train_T': True,
-            'solver': 'dopri5',
-            'use_adjoint': True,
-            'atol': 1e-5,
-            'rtol': 1e-5,
-            'batch_norm': False,
-            'bn_lag': 0,
-            'sync_bn': False
-        }
-        self.latent_cnf = get_latent_cnf(self.flow_args)
+        if self.use_flow_prior:
+            self.flow_args = {
+                'latent_dims': "256-256",
+                'latent_num_blocks': 1,
+                'zdim': latent_size,
+                'layer_type': 'concatsquash',
+                'nonlinearity': 'tanh',
+                'time_length': 0.5,
+                'train_T': True,
+                'solver': 'dopri5',
+                'use_adjoint': True,
+                'atol': 1e-5,
+                'rtol': 1e-5,
+                'batch_norm': False,
+                'bn_lag': 0,
+                'sync_bn': False
+            }
+            self.latent_cnf = get_latent_cnf(self.flow_args)
 
 
     def encode(self, sequence_batch):
@@ -416,10 +420,13 @@ class LSTMVAE(nn.Module):
         entropy = self.gaussian_entropy(z_log_var)  # batch_size,
         z_vecs = self.reparameterize(z_mean, z_log_var, nsamples).reshape(batch_size * nsamples, self.latent_size)
 
-        w, delta_log_pw = self.latent_cnf(z_vecs, None, torch.zeros(batch_size * nsamples, 1).to(z_vecs))
-        log_pw = self.standard_normal_logprob(w).reshape(batch_size, nsamples, 1)
-        delta_log_pw = delta_log_pw.reshape(batch_size, nsamples, 1)
-        log_pz = log_pw - delta_log_pw
+        if self.use_flow_prior:
+            w, delta_log_pw = self.latent_cnf(z_vecs, None, torch.zeros(batch_size * nsamples, 1).to(z_vecs))
+            log_pw = self.standard_normal_logprob(w).reshape(batch_size, nsamples, 1)
+            delta_log_pw = delta_log_pw.reshape(batch_size, nsamples, 1)
+            log_pz = log_pw - delta_log_pw
+        else:
+            log_pz = self.standard_normal_logprob(z_vecs).reshape(batch_size, nsamples, 1)
 
         return z_vecs.reshape(batch_size, nsamples, self.latent_size), (entropy, log_pz)
 
@@ -555,19 +562,30 @@ class LSTMVAE(nn.Module):
 
     def aux_regressor(self, latent_vec, fe_target):
         batch_size = len(fe_target)
-        predicted_fe = self.regressor_output(self.regressor_nonlinear(latent_vec))[:, 0]
+        '''note: nonlinearity added'''
+        predicted_fe = self.regressor_output(torch.relu(self.regressor_nonlinear(latent_vec)))[:, 0]
         normed_fe_loss = self.normed_fe_loss(
             predicted_fe,
             torch.as_tensor(np.array(fe_target, dtype=np.float32)).to(self.device)) \
                          / batch_size
-        normed_fe_corr = pearsonr(torch.sigmoid(predicted_fe).cpu().detach().numpy(), fe_target)[0]
+        preds = torch.sigmoid(predicted_fe).cpu().detach().numpy()
+        if np.any(np.isfinite(preds) is False):
+            print('NAN/inf in pearson correlation!')
+            valid_idx = np.isfinite(preds)
+            if sum(valid_idx) > 0:
+                normed_fe_corr = pearsonr(preds[valid_idx], np.array(fe_target)[valid_idx])[0]
+            else:
+                normed_fe_corr = 0.
+        else:
+            normed_fe_corr = pearsonr(preds, fe_target)[0]
         return normed_fe_loss, normed_fe_corr
 
 
     def forward(self, sequence_batch, sequence_label, fe_target):
         latent_vec = self.encode(sequence_batch)
 
-        normed_fe_loss, normed_fe_corr = self.aux_regressor(latent_vec, fe_target)
+        if self.use_aux_regressor:
+            normed_fe_loss, normed_fe_corr = self.aux_regressor(latent_vec, fe_target)
 
         latent_vec, (entropy, log_pz) = self.rsample(latent_vec, nsamples=1)
         latent_vec = latent_vec[:, 0, :]  # squeeze
@@ -576,7 +594,8 @@ class LSTMVAE(nn.Module):
 
         ret_dict['entropy_loss'] = -entropy.mean()
         ret_dict['prior_loss'] = -log_pz.mean()
-        ret_dict['normed_fe_loss'] = normed_fe_loss
-        ret_dict['normed_fe_corr'] = normed_fe_corr
+        if self.use_aux_regressor:
+            ret_dict['normed_fe_loss'] = normed_fe_loss
+            ret_dict['normed_fe_corr'] = normed_fe_corr
 
         return ret_dict
