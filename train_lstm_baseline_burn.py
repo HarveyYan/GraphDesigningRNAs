@@ -99,15 +99,15 @@ if __name__ == "__main__":
     print('Loading all training data for quick memory access')
     all_train_data = []
     sample_loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size,
-                                       num_workers=4, limit_data=True)
+                                       num_workers=4, limit_data=20)
     for _, burn_batch_sequence, burn_batch_label, burn_batch_fe in sample_loader:
         all_train_data.append((burn_batch_sequence, burn_batch_label, burn_batch_fe))
-    all_train_data = all_train_data
+    print('All data loaded, %d batches in total' % (len(all_train_data)))
     del sample_loader
 
     for epoch in range(1, args.epoch + 1):
 
-        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4, limit_data=True)
+        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4, limit_data=20)
         
         beta = min(args.max_beta, beta + args.step_beta)
         for batch in loader:
@@ -141,7 +141,7 @@ if __name__ == "__main__":
                     nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
                     enc_optimizer.step()
 
-                    burn_batch_sequence, burn_batch_label, burn_batch_fe = all_idx[sub_iter - 1]
+                    burn_batch_sequence, burn_batch_label, burn_batch_fe = all_train_data[all_idx[sub_iter - 1]]
 
                     if sub_iter % args.burn_iloop_check_freq == 0:
                         burn_cur_loss = burn_cur_loss / sub_iter

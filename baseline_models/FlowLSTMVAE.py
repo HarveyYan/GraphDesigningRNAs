@@ -574,7 +574,7 @@ class LSTMVAE(nn.Module):
             torch.as_tensor(np.array(fe_target, dtype=np.float32)).to(self.device)) \
                          / batch_size
         preds = torch.sigmoid(predicted_fe).cpu().detach().numpy()
-        if np.any(np.isfinite(preds) is False):
+        if np.any(np.isfinite(preds) == False):
             print('NAN/inf in pearson correlation!')
             valid_idx = np.isfinite(preds)
             if sum(valid_idx) > 0:
