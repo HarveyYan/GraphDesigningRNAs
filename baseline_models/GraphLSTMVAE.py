@@ -8,12 +8,13 @@ from torch.utils.data import Dataset, DataLoader
 import pickle
 import random
 from scipy.stats import pearsonr
+import forgi.graph.bulge_graph as fgb
 
 basedir = os.path.split(os.path.dirname(os.path.abspath(__file__)))[0]
 sys.path.append(basedir)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from lib.nn_utils import log_sum_exp
+from lib.nn_utils import log_sum_exp, index_select_ND
 from cnf_models.flow import get_latent_cnf
 
 NUC_VOCAB = ['A', 'C', 'G', 'U']
@@ -34,10 +35,22 @@ allowed_basepairs = [[False, False, False, True],
                      [False, True, False, True],
                      [True, False, True, False]]
 
+NUC_FDIM = 4
+BOND_FDIM = 4
+# 5' to 3' covalent bond,
+# 3' to 5' covalent bond,
+# 5' to 3' bp bond,
+# 3' to 5' bp bond
+
+MAX_NB = 3
+
+
+# maximal number of incoming messages
+
 
 class BasicLSTMVAEFolder:
 
-    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True, limit_data=None, use_graph_encoder=False):
+    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True, limit_data=None):
         self.data_folder = data_folder
         self.limit_data = limit_data
         if self.limit_data:
@@ -84,6 +97,7 @@ class LSTMBaselineDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):  # joint encoding of the structure and sequence
+        graph_encoder_input = GraphEncoder.prepare_batch_data([data[:2] for data in self.data[idx]])
         all_joint_encoding = []
         all_label = []
         all_free_energy = []
@@ -97,53 +111,69 @@ class LSTMBaselineDataset(Dataset):
             all_joint_encoding.append(joint_encoding)
             all_label.append(label)
             all_free_energy.append(np.abs(free_energy / len(seq)) / MAX_FE)  # length normalized minimum free energy
-        return self.data[idx], all_joint_encoding, all_label, all_free_energy
+        return self.data[idx], all_joint_encoding, all_label, all_free_energy, graph_encoder_input
 
 
-class LSTMEncoder(nn.Module):
+class GraphEncoder(nn.Module):
 
     def __init__(self, hidden_size, depth, **kwargs):
-        super(LSTMEncoder, self).__init__()
+        super(GraphEncoder, self).__init__()
         self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.depth = depth
-        self.use_attention = kwargs.get('use_attention', False)
 
-        self.lstm = torch.nn.LSTM(FDIM_JOINT_VOCAB, hidden_size, bidirectional=True, batch_first=True,
-                                  num_layers=self.depth)
+        self.w_local = nn.Linear(NUC_FDIM + BOND_FDIM, hidden_size, bias=False)
+        self.w_msg = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.w_node_emb = nn.Linear(hidden_size + NUC_FDIM, hidden_size, bias=False)
 
-        if self.use_attention:
-            self.nb_heads = kwargs.get('nb_heads', 4)
-            self.attention_layer = nn.MultiheadAttention(self.hidden_size * 2, self.nb_heads)
+        self.nuc_order_lstm = torch.nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
+        # bidirectional hence hidden_size//2
 
-    def forward(self, sequence_batch):
-        batch_size = len(sequence_batch)
-        all_len = [len(seq) for seq in sequence_batch]
+    def send_to_device(self, *args):
+        ret = []
+        for item in args:
+            ret.append(item.to(self.device))
+        return ret
+
+    def forward(self, f_nuc, f_bond, node_graph, message_graph, all_bonds, scope):
+
+        # f_nuc is included in f_bond
+        f_nuc, f_bond, node_graph, message_graph = \
+            self.send_to_device(f_nuc, f_bond, node_graph, message_graph)
+
+        local_potentials = self.w_local(f_bond)
+        # messages from the first iteration
+        messages = torch.relu(local_potentials)
+
+        for i in range(1, self.depth):
+            nei_message = index_select_ND(messages, 0, message_graph)
+            sum_nei_message = nei_message.sum(dim=1)
+            nb_clique_msg_prop = self.w_msg(sum_nei_message)
+            messages = torch.relu(local_potentials + nb_clique_msg_prop)
+
+        nuc_nb_msg = index_select_ND(messages, 0, node_graph).sum(dim=1)
+        nuc_embedding = torch.relu(self.w_node_emb(torch.cat([f_nuc, nuc_nb_msg], dim=1)))
+
+        ''' bilstm to add order information into the learnt node embeddings '''
+        batch_size = len(scope)
+        all_len = list(np.array(scope)[:, 1])
         max_len = max(all_len)
         all_pre_padding_idx = np.concatenate(
             [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)]).astype(np.long)
 
-        padded_seq_vec = nn.utils.rnn.pad_sequence([torch.as_tensor(np.array(seq)) for seq in sequence_batch],
-                                                   batch_first=True).to(self.device)
-        # [batch_size, max_len, FDIM_JOINT_VOCAB]
+        batch_rna_vec = []
+        for start_idx, length in scope:
+            batch_rna_vec.append(nuc_embedding[start_idx: start_idx + length])
 
-        packed_seq_vec = nn.utils.rnn.pack_padded_sequence(
-            padded_seq_vec, all_len, enforce_sorted=False, batch_first=True)
+        # [batch_size, max_len, hidden_size]
+        padded_rna_vec = nn.utils.rnn.pad_sequence(batch_rna_vec, batch_first=True)
+        packed_rna_vec = nn.utils.rnn.pack_padded_sequence(
+            padded_rna_vec, all_len, enforce_sorted=False, batch_first=True)
 
-        output, _ = self.lstm(packed_seq_vec)
-
+        output, (hn, cn) = self.nuc_order_lstm(packed_rna_vec)
         output = nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[0]
 
-        if self.use_attention:
-            batch_second_output = output.transpose(0, 1)
-            key_padding_mask = torch.as_tensor(
-                [[False] * all_len[i] + [True] * (max_len - all_len[i]) for i in range(batch_size)]).to(self.device)
-            batch_second_output = self.attention_layer(
-                batch_second_output, batch_second_output, batch_second_output,
-                key_padding_mask=key_padding_mask)[0]
-            output = batch_second_output.transpose(0, 1)
-
-        nuc_embedding = output.reshape(batch_size * max_len, self.hidden_size * 2). \
+        nuc_embedding = output.reshape(batch_size * max_len, self.hidden_size). \
             index_select(0, torch.as_tensor(all_pre_padding_idx).to(self.device))
 
         representation = []
@@ -153,6 +183,90 @@ class LSTMEncoder(nn.Module):
             start += length
 
         return torch.stack(representation, dim=0)
+
+    @staticmethod
+    def prepare_batch_data(rna_mol_batch):
+        # sparse encoding, index operations
+
+        nuc_offset = 0
+
+        f_nuc, f_bond = [], [torch.zeros(NUC_FDIM + BOND_FDIM)]
+        # nucleotide features and bond features, merely one hot encoding at this stage
+
+        in_bonds, all_bonds = [], [(-1, -1)]
+        # keeps the indices of incoming messages
+
+        scope = []
+
+        for rna_seq, rna_struct in rna_mol_batch:
+            len_seq = len(rna_seq)
+            for nuc in rna_seq:
+                onehot_enc = np.array(list(map(lambda x: x == nuc, NUC_VOCAB)), dtype=np.float32)
+                f_nuc.append(torch.as_tensor(onehot_enc))
+                in_bonds.append([])
+
+            # authentic molecular graph
+            bg = fgb.BulgeGraph.from_dotbracket(rna_struct)
+            for i, st_ele in enumerate(rna_struct):
+                # covalent bonds
+                cb_from = i + nuc_offset
+                if i < len_seq - 1:  # 5' to 3' covalent bond
+                    cb_to = cb_from + 1
+                    idx_ref = len(all_bonds)
+                    all_bonds.append([cb_from, cb_to])
+                    f_bond.append(torch.cat(
+                        [f_nuc[cb_from], torch.as_tensor(
+                            np.array([1., 0., 0., 0.], dtype=np.float32))]))
+                    in_bonds[cb_to].append(idx_ref)
+                if i > 0:  # 3' to 5' covalent bond
+                    cb_to = cb_from - 1
+                    idx_ref = len(all_bonds)
+                    all_bonds.append([cb_from, cb_to])
+                    f_bond.append(torch.cat(
+                        [f_nuc[cb_from], torch.as_tensor(
+                            np.array([0., 1., 0., 0.], dtype=np.float32))]))
+                    in_bonds[cb_to].append(idx_ref)
+
+                # base-pairing
+                if st_ele != '.':
+                    bp_from = i + nuc_offset
+                    bp_to = bg.pairing_partner(i + 1) - 1 + nuc_offset
+                    idx_ref = len(all_bonds)
+                    all_bonds.append([bp_from, bp_to])
+                    if bp_to > bp_from:
+                        onehot_enc = torch.as_tensor(
+                            np.array([0., 0., 1., 0.], dtype=np.float32))
+                    else:
+                        onehot_enc = torch.as_tensor(
+                            np.array([0., 0., 0., 1.], dtype=np.float32))
+                    f_bond.append(torch.cat([f_nuc[bp_from], onehot_enc]))
+                    in_bonds[bp_to].append(idx_ref)
+
+            scope.append((nuc_offset, len_seq))
+            nuc_offset += len_seq
+
+        total_nuc = nuc_offset
+        total_bonds = len(all_bonds)
+        f_nuc = torch.stack(f_nuc)
+        f_bond = torch.stack(f_bond)
+
+        node_graph = torch.zeros(total_nuc, MAX_NB, dtype=torch.long)
+        # keeps a list of indices of incoming messages for the update of a node-embedding
+
+        message_graph = torch.zeros(total_bonds, MAX_NB, dtype=torch.long)
+        # indices needed for the update of each message
+
+        for nuc_idx in range(total_nuc):
+            for i, msg_idx in enumerate(in_bonds[nuc_idx]):
+                node_graph[nuc_idx, i] = msg_idx
+
+        for bond_idx in range(1, total_bonds):
+            nuc_idx_from, nuc_idx_to = all_bonds[bond_idx]
+            for i, msg_idx in enumerate(in_bonds[nuc_idx_from]):
+                if all_bonds[msg_idx][0] != nuc_idx_to:
+                    message_graph[bond_idx, i] = msg_idx
+
+        return f_nuc, f_bond, node_graph, message_graph, all_bonds, scope
 
 
 class LSTMDecoder(nn.Module):
@@ -371,7 +485,7 @@ class LSTMDecoder(nn.Module):
         return decoded_sequence, decoded_structure
 
 
-class LSTMVAE(nn.Module):
+class GraphLSTMVAE(nn.Module):
 
     def __init__(self, hidden_size, latent_size, depthEncoder, **kwargs):
         super(LSTMVAE, self).__init__()
@@ -383,7 +497,7 @@ class LSTMVAE(nn.Module):
         self.use_aux_regressor = kwargs.get('use_aux_regressor', True)
         self.use_flow_prior = kwargs.get('use_flow_prior', True)
 
-        self.encoder = LSTMEncoder(self.hidden_size, self.depthEncoder, **kwargs)
+        self.encoder = GraphEncoder(self.hidden_size, self.depthEncoder, **kwargs)
         self.mean = nn.Linear(2 * hidden_size, latent_size)
         self.var = nn.Linear(2 * hidden_size, latent_size)
 
@@ -412,8 +526,8 @@ class LSTMVAE(nn.Module):
             }
             self.latent_cnf = get_latent_cnf(self.flow_args)
 
-    def encode(self, sequence_batch):
-        latent_vec = self.encoder(sequence_batch)
+    def encode(self, batch_graph_input):
+        latent_vec = self.encoder(*batch_graph_input)
         return latent_vec
 
     def rsample(self, latent_vec, nsamples=1):
@@ -455,14 +569,14 @@ class LSTMVAE(nn.Module):
         ent = 0.5 * logvar.sum(dim=1, keepdim=False) + const
         return ent
 
-    def calc_mi(self, sequence_batch, latent_vec=None):
+    def calc_mi(self, batch_graph_input, latent_vec=None):
         """Approximate the mutual information between x and z under the approximate posterior
         I(x, z) = E_xE_{q(z|x)}log(q(z|x)) - E_xE_{q(z|x)}log(q(z))
         Returns: Float
         """
         # [x_batch, nz]
         if latent_vec is None:
-            latent_vec = self.encode(sequence_batch)
+            latent_vec = self.encode(*batch_graph_input)
         z_mean = self.mean(latent_vec)
         z_log_var = -torch.abs(self.var(latent_vec))  # Following Mueller et al.
         x_batch, nz = z_mean.size()
@@ -483,7 +597,7 @@ class LSTMVAE(nn.Module):
         log_qz = log_sum_exp(log_density, dim=1) - np.log(x_batch)
         return (neg_entropy - log_qz.mean(-1)).item()
 
-    def eval_inference_dist(self, sequence_batch, z_vec, param=None):
+    def eval_inference_dist(self, batch_graph_input, z_vec, param=None):
         """this function computes log q(z | x)
         Args:
             z: tensor
@@ -496,7 +610,7 @@ class LSTMVAE(nn.Module):
         nz = z_vec.size(2)
 
         if not param:
-            latent_vec = self.encode(sequence_batch)
+            latent_vec = self.encode(*batch_graph_input)
             mu, logvar = self.mean(latent_vec), -torch.abs(self.var(latent_vec))
         else:
             mu, logvar = param
@@ -514,7 +628,7 @@ class LSTMVAE(nn.Module):
 
         return log_density
 
-    def nll_iw(self, sequence_batch, sequence_label, nsamples, ns=100, latent_vec=None):
+    def nll_iw(self, sequence_batch, sequence_label, batch_graph_input, nsamples, ns=100, latent_vec=None):
         """compute the importance weighting estimate of the log-likelihood
         Args:
             x: if the data is constant-length, x is the data tensor with
@@ -532,7 +646,7 @@ class LSTMVAE(nn.Module):
         tmp = []
         batch_size = len(sequence_batch)
         if latent_vec is None:
-            latent_vec = self.encode(sequence_batch)
+            latent_vec = self.encode(*batch_graph_input)
         for _ in range(int(nsamples / ns)):
             # [batch, ns, nz]
             z_vec, (entropy, log_pz) = self.rsample(latent_vec, ns)
@@ -546,7 +660,7 @@ class LSTMVAE(nn.Module):
             log_comp_ll = log_pz[:, :, 0] + recon_log_prob
 
             # log q(z|x)
-            log_infer_ll = self.eval_inference_dist(sequence_batch, z_vec,
+            log_infer_ll = self.eval_inference_dist(batch_graph_input, z_vec,
                                                     param=(self.mean(latent_vec),
                                                            -torch.abs(self.var(latent_vec))))
 
@@ -576,8 +690,8 @@ class LSTMVAE(nn.Module):
             normed_fe_corr = pearsonr(preds, fe_target)[0]
         return normed_fe_loss, normed_fe_corr
 
-    def forward(self, sequence_batch, sequence_label, fe_target):
-        latent_vec = self.encode(sequence_batch)
+    def forward(self, sequence_batch, sequence_label, fe_target, batch_graph_input):
+        latent_vec = self.encode(batch_graph_input)
 
         if self.use_aux_regressor:
             normed_fe_loss, normed_fe_corr = self.aux_regressor(latent_vec, fe_target)
