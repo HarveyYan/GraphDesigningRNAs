@@ -37,7 +37,7 @@ allowed_basepairs = [[False, False, False, True],
 
 class BasicLSTMVAEFolder:
 
-    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True, limit_data=None, use_graph_encoder=False):
+    def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True, limit_data=None):
         self.data_folder = data_folder
         self.limit_data = limit_data
         if self.limit_data:

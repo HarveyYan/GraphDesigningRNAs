@@ -33,6 +33,10 @@ parser.add_argument('--epoch', type=int, default=10)
 # parser.add_argument('--anneal_rate', type=float, default=0.9)
 parser.add_argument('--print_iter', type=int, default=1000)
 parser.add_argument('--warmup_epoch', type=int, default=1)
+parser.add_argument('--use_attention', type=eval, default=True, choices=[True, False])
+parser.add_argument('--use_flow_prior', type=eval, default=True, choices=[True, False])
+parser.add_argument('--limit_data', type=int, default=None)
+
 
 if __name__ == "__main__":
 
@@ -42,7 +46,8 @@ if __name__ == "__main__":
     print(args)
 
     model = LSTMVAE(args.hidden_size, args.latent_size, args.depth,
-                    device=device, use_attention=True, nb_heads=4).to(device)
+                    device=device, use_attention=args.use_attention, nb_heads=4,
+                    use_flow_prior=args.use_flow_prior).to(device)
     print(model)
     for param in model.parameters():
         if param.dim() == 1:
@@ -83,7 +88,7 @@ if __name__ == "__main__":
 
     for epoch in range(1, args.epoch + 1):
 
-        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=2)
+        loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=2, limit_data=args.limit_data)
         for batch in loader:
             original_data, batch_sequence, batch_label, batch_fe = batch
             total_step += 1
@@ -154,8 +159,8 @@ if __name__ == "__main__":
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
         post_max_iters = min(10, nb_iters)  # for efficiency
         total = 0
-        bar = trange(nb_iters, desc='', leave=True)
-        loader = loader.__iter__()
+        # bar = trange(nb_iters, desc='', leave=True)
+        # loader = loader.__iter__()
         nb_encode, nb_decode = 4, 4
 
         recon_acc, post_valid, post_fe_deviation = 0, 0, 0.
@@ -168,8 +173,8 @@ if __name__ == "__main__":
         nll_iw = 0.
 
         with torch.no_grad():
-            for i in bar:
-                original_data, batch_sequence, batch_label, batch_fe = next(loader)
+            # for i in bar:
+            for i, (original_data, batch_sequence, batch_label, batch_fe) in enumerate(loader):
                 latent_vec = model.encode(batch_sequence)
 
                 if i < post_max_iters:
@@ -240,8 +245,9 @@ if __name__ == "__main__":
 
             sampled_latent_prior = torch.as_tensor(np.random.randn(1000, args.latent_size).astype(np.float32)).to(
                 device)
-            sampled_latent_prior = model.latent_cnf(sampled_latent_prior, None, reverse=True).view(
-                *sampled_latent_prior.size())
+            if args.use_flow_prior:
+                sampled_latent_prior = model.latent_cnf(sampled_latent_prior, None, reverse=True).view(
+                    *sampled_latent_prior.size())
 
             prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=True)

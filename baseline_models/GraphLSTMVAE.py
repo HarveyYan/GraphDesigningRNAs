@@ -125,8 +125,9 @@ class GraphEncoder(nn.Module):
         self.w_local = nn.Linear(NUC_FDIM + BOND_FDIM, hidden_size, bias=False)
         self.w_msg = nn.Linear(hidden_size, hidden_size, bias=False)
         self.w_node_emb = nn.Linear(hidden_size + NUC_FDIM, hidden_size, bias=False)
+        self.update_gru = nn.GRUCell(hidden_size, hidden_size)
 
-        self.nuc_order_lstm = torch.nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
+        self.nuc_order_lstm = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
         # bidirectional hence hidden_size//2
 
     def send_to_device(self, *args):
@@ -149,7 +150,9 @@ class GraphEncoder(nn.Module):
             nei_message = index_select_ND(messages, 0, message_graph)
             sum_nei_message = nei_message.sum(dim=1)
             nb_clique_msg_prop = self.w_msg(sum_nei_message)
-            messages = torch.relu(local_potentials + nb_clique_msg_prop)
+            messages = self.update_gru(
+                messages,
+                torch.relu(local_potentials + nb_clique_msg_prop))
 
         nuc_nb_msg = index_select_ND(messages, 0, node_graph).sum(dim=1)
         nuc_embedding = torch.relu(self.w_node_emb(torch.cat([f_nuc, nuc_nb_msg], dim=1)))
@@ -488,7 +491,7 @@ class LSTMDecoder(nn.Module):
 class GraphLSTMVAE(nn.Module):
 
     def __init__(self, hidden_size, latent_size, depthEncoder, **kwargs):
-        super(LSTMVAE, self).__init__()
+        super(GraphLSTMVAE, self).__init__()
 
         self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
@@ -498,12 +501,12 @@ class GraphLSTMVAE(nn.Module):
         self.use_flow_prior = kwargs.get('use_flow_prior', True)
 
         self.encoder = GraphEncoder(self.hidden_size, self.depthEncoder, **kwargs)
-        self.mean = nn.Linear(2 * hidden_size, latent_size)
-        self.var = nn.Linear(2 * hidden_size, latent_size)
+        self.mean = nn.Linear(hidden_size, latent_size)
+        self.var = nn.Linear(hidden_size, latent_size)
 
         self.decoder = LSTMDecoder(self.hidden_size, self.latent_size, **kwargs)
         if self.use_aux_regressor:
-            self.regressor_nonlinear = nn.Linear(2 * hidden_size, hidden_size)
+            self.regressor_nonlinear = nn.Linear(hidden_size, hidden_size)
             self.regressor_output = nn.Linear(hidden_size, 1)
             self.normed_fe_loss = nn.BCEWithLogitsLoss(reduction='sum')
 
