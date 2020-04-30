@@ -5,18 +5,39 @@ import numpy as np
 import torch
 import gc
 
+NUC_VOCAB = ['A', 'C', 'G', 'U']
+allowed_basepairs = [[False, False, False, True],
+                     [False, False, True, False],
+                     [False, True, False, True],
+                     [True, False, True, False]]
+
 model = None
 
-def isvalid(dotbracket_struct):
-    # todo, check basepairing validity
+
+def isvalid(args, check_basepairing=False):
+    if check_basepairing:
+        rna_seq, dotbracket_struct = args
+    else:
+        dotbracket_struct = args
+
     # check that hairpin has at least 3 nucleotides
     for match in re.finditer(r'\([.]*\)', dotbracket_struct):
         if match.end() - match.start() < 5:
             return False
     try:
-        fgb.BulgeGraph.from_dotbracket(dotbracket_struct)
+        bg = fgb.BulgeGraph.from_dotbracket(dotbracket_struct)
     except ValueError:
         return False
+
+    if check_basepairing:
+        for i, st_ele in enumerate(dotbracket_struct):
+            # base-pairing
+            if st_ele == '(':
+                to = bg.pairing_partner(i + 1) - 1
+                nuc_from_idx = NUC_VOCAB.index(rna_seq[i])
+                nuc_to_idx = NUC_VOCAB.index(rna_seq[to])
+                if allowed_basepairs[nuc_from_idx][nuc_to_idx] is False:
+                    return False
 
     return True
 
@@ -82,7 +103,7 @@ def prior_check_subroutine(args):
     return ret
 
 
-def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforce_rna_prior=True):
+def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforce_rna_prior=True, prob_decode=True):
     prior_valid = [0] * nb_samples
     prior_fe_deviation = [0] * nb_samples
     batch_idx = list(range(nb_samples))
@@ -90,7 +111,7 @@ def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforc
     batch_idx = batch_idx * nb_decode
     to_decode_latent = torch.cat([sampled_latent_vector] * nb_decode, dim=0)
 
-    decoded_seq, decoded_struct = model.decoder.decode(to_decode_latent, prob_decode=True,
+    decoded_seq, decoded_struct = model.decoder.decode(to_decode_latent, prob_decode=prob_decode,
                                                        enforce_rna_prior=enforce_rna_prior)
 
     ret = np.array(list(mp_pool.imap(prior_check_subroutine,
@@ -100,4 +121,4 @@ def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforc
         prior_valid[batch_idx[i]] += r[0]
         prior_fe_deviation[batch_idx[i]] += r[1]
 
-    return prior_valid, prior_fe_deviation
+    return prior_valid, prior_fe_deviation, decoded_seq, decoded_struct

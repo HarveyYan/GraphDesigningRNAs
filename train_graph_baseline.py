@@ -38,7 +38,7 @@ parser.add_argument('--limit_data', type=int, default=None)
 
 if __name__ == "__main__":
 
-    device = torch.device('cuda:5' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:4' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
     print(args)
@@ -94,7 +94,7 @@ if __name__ == "__main__":
             ret_dict = model(batch_sequence, batch_label, batch_fe, batch_graph_input)
 
             loss = ret_dict['sum_nuc_pred_loss'] / ret_dict['nb_nuc_targets'] + \
-                   0. * ret_dict['normed_fe_loss'] + beta * (ret_dict['entropy_loss'] + ret_dict['prior_loss'])
+                   0.1 * ret_dict['normed_fe_loss'] + beta * (ret_dict['entropy_loss'] + ret_dict['prior_loss'])
 
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
@@ -246,12 +246,12 @@ if __name__ == "__main__":
                 sampled_latent_prior = model.latent_cnf(sampled_latent_prior, None, reverse=True).view(
                     *sampled_latent_prior.size())
 
-            prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
+            prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=True)
             lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
-            prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
+            prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=False)
             lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)

@@ -36,6 +36,7 @@ parser.add_argument('--warmup_epoch', type=int, default=1)
 parser.add_argument('--use_attention', type=eval, default=True, choices=[True, False])
 parser.add_argument('--use_flow_prior', type=eval, default=True, choices=[True, False])
 parser.add_argument('--limit_data', type=int, default=None)
+parser.add_argument('--resume', type=eval, default=False, choices=[True, False])
 
 
 if __name__ == "__main__":
@@ -82,11 +83,29 @@ if __name__ == "__main__":
                                    'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg', 'Validation_post_fe_deviation_with_reg',
                                    'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg', 'Validation_post_fe_deviation_no_reg',
                                    'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg', 'Prior_fe_deviation_no_reg',
+                                   'Prior_valid_no_reg_greedy', 'Prior_fe_deviation_no_reg_greedy', 'Prior_uniqueness_no_reg_greedy',
                                    'Validation_mutual_information', 'Validation_NLL_IW_100', 'Validation_active_units'])
 
     mp_pool = Pool(8)
 
-    for epoch in range(1, args.epoch + 1):
+    if args.resume:
+        '''load warm-up results'''
+        if args.use_flow_prior:
+            if args.use_attention:
+                weight_path = '/home/zichao/lstm_baseline_output/20200423-234937-cnf-flow-prior-maxpool-annealling/model.epoch-5'
+            else:
+                weight_path = '/home/zichao/lstm_baseline_output/20200427-175431-cnf-flow-prior-no-att-aggr-anneal/model.epoch-5'
+        else:
+            weight_path = '/home/zichao/lstm_baseline_output/20200427-204831-no-flow-prior-aggr-anneal/model.epoch-5'
+        all_weights = torch.load(weight_path)
+        model.load_state_dict(all_weights['model_weights'])
+        optimizer.load_state_dict(all_weights['opt_weights'])
+        print('Weights loaded from', weight_path)
+        epoch_to_start = 6
+    else:
+        epoch_to_start = 1
+
+    for epoch in range(epoch_to_start, args.epoch + 1):
 
         loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=2, limit_data=args.limit_data)
         for batch in loader:
@@ -120,8 +139,8 @@ if __name__ == "__main__":
             if total_step % args.print_iter == 0:
                 meters /= args.print_iter
                 print(
-                    "[%d] Entropy: %.2f, Neg_log_prior: %.2f, KL: %.2f, Pearson Corr: %.2f, Stop symbol: %.2f, Nucleotide symbol: %.2f, Structural symbol: %.2f, All symbol: %.2f, PNorm: %.2f, GNorm: %.2f" % (
-                        total_step, -meters[0], meters[1], meters[2], meters[3], meters[4], meters[5], meters[6],
+                    "[%d] Beta: %.4f, Entropy: %.2f, Neg_log_prior: %.2f, KL: %.2f, Pearson Corr: %.2f, Stop symbol: %.2f, Nucleotide symbol: %.2f, Structural symbol: %.2f, All symbol: %.2f, PNorm: %.2f, GNorm: %.2f" % (
+                        total_step, beta, -meters[0], meters[1], meters[2], meters[3], meters[4], meters[5], meters[6],
                         meters[7],
                         param_norm(model), grad_norm(model)))
                 lib.plot_utils.plot('Train_Entropy', -meters[0], index=0)
@@ -249,15 +268,22 @@ if __name__ == "__main__":
                 sampled_latent_prior = model.latent_cnf(sampled_latent_prior, None, reverse=True).view(
                     *sampled_latent_prior.size())
 
-            prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
+            prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=True)
             lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
-            prior_valid, prior_fe_deviation = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
+            prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=False)
             lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+
+            prior_valid, prior_fe_deviation, decoded_seq, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
+                                                             enforce_rna_prior=False)
+            decoded_seq = decoded_seq[:1000]
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / 10)
 
             cur_mi = total_mi / nb_iters
             lib.plot_utils.plot('Validation_mutual_information', cur_mi, index=1)

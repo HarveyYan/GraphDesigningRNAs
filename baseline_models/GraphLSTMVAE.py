@@ -145,14 +145,18 @@ class GraphEncoder(nn.Module):
         local_potentials = self.w_local(f_bond)
         # messages from the first iteration
         messages = torch.relu(local_potentials)
+        mask = torch.ones(messages.size(0), 1).to(self.device)
+        mask[0] = 0  # first vector is padding
 
         for i in range(1, self.depth):
             nei_message = index_select_ND(messages, 0, message_graph)
             sum_nei_message = nei_message.sum(dim=1)
             nb_clique_msg_prop = self.w_msg(sum_nei_message)
-            messages = self.update_gru(
-                messages,
-                torch.relu(local_potentials + nb_clique_msg_prop))
+            new_msg = torch.relu(local_potentials + nb_clique_msg_prop)
+            messages = self.update_gru(new_msg, messages)
+            # new_msg = torch.relu(self.w_msg(torch.cat([local_potentials, sum_nei_message], dim=-1)))
+            # messages = self.update_gru(new_msg, messages)
+            messages = messages * mask
 
         nuc_nb_msg = index_select_ND(messages, 0, node_graph).sum(dim=1)
         nuc_embedding = torch.relu(self.w_node_emb(torch.cat([f_nuc, nuc_nb_msg], dim=1)))
@@ -201,11 +205,20 @@ class GraphEncoder(nn.Module):
 
         scope = []
 
+        max_len = max([len(pair[0]) for pair in rna_mol_batch])
+        '''positional encoding'''
+        pe = torch.zeros(max_len, LEN_NUC_VOCAB, dtype=torch.float32)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, LEN_NUC_VOCAB, 2) *
+                             -(np.log(10000.0) / LEN_NUC_VOCAB))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
         for rna_seq, rna_struct in rna_mol_batch:
             len_seq = len(rna_seq)
-            for nuc in rna_seq:
+            for i, nuc in enumerate(rna_seq):
                 onehot_enc = np.array(list(map(lambda x: x == nuc, NUC_VOCAB)), dtype=np.float32)
-                f_nuc.append(torch.as_tensor(onehot_enc))
+                f_nuc.append(torch.as_tensor(onehot_enc) + pe[i])
                 in_bonds.append([])
 
             # authentic molecular graph
@@ -266,8 +279,8 @@ class GraphEncoder(nn.Module):
         for bond_idx in range(1, total_bonds):
             nuc_idx_from, nuc_idx_to = all_bonds[bond_idx]
             for i, msg_idx in enumerate(in_bonds[nuc_idx_from]):
-                if all_bonds[msg_idx][0] != nuc_idx_to:
-                    message_graph[bond_idx, i] = msg_idx
+                # if all_bonds[msg_idx][0] != nuc_idx_to:
+                message_graph[bond_idx, i] = msg_idx
 
         return f_nuc, f_bond, node_graph, message_graph, all_bonds, scope
 
@@ -683,14 +696,25 @@ class GraphLSTMVAE(nn.Module):
                          / batch_size
         preds = torch.sigmoid(predicted_fe).cpu().detach().numpy()
         if np.any(np.isfinite(preds) == False):
-            print('NAN/inf in pearson correlation!')
+            print('NAN/inf in pearson correlation!', flush=True)
+            torch.save(self.state_dict(), 'lstm_baseline_output/blunder')
+            import pdb
+            pdb.set_trace()
             valid_idx = np.isfinite(preds)
             if sum(valid_idx) > 0:
                 normed_fe_corr = pearsonr(preds[valid_idx], np.array(fe_target)[valid_idx])[0]
             else:
                 normed_fe_corr = 0.
         else:
-            normed_fe_corr = pearsonr(preds, fe_target)[0]
+            if len(set(preds)) == 1:
+                normed_fe_corr = 0.
+                print('pearson warning', flush=True)
+                torch.save(self.state_dict(), 'lstm_baseline_output/new_blunder')
+                import pdb
+                pdb.set_trace()
+            else:
+                normed_fe_corr = pearsonr(preds, fe_target)[0]
+
         return normed_fe_loss, normed_fe_corr
 
     def forward(self, sequence_batch, sequence_label, fe_target, batch_graph_input):

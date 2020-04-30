@@ -30,7 +30,8 @@ def draw_graph(adj=None, G = None, marginals=None,
 
 
 plt.style.use('classic')
-matplotlib.rcParams.update({'figure.figsize': [10.0, 10.0], 'font.family': 'Times New Roman', 'figure.dpi': 350})
+font = {'fontname': 'Times New Roman', 'size': 14}
+matplotlib.rcParams.update({'figure.figsize': [5., 5.], 'font.family': 'Times New Roman', 'figure.dpi': 350})
 matplotlib.rcParams['agg.path.chunksize'] = 1e10
 import collections
 
@@ -106,8 +107,8 @@ def flush():
         else:  # with standard deviation
             plt.plot(x_vals, y_vals[:, 0])
             plt.fill_between(x_vals, y_vals[:, 0] - y_vals[:, 1], y_vals[:, 0] + y_vals[:, 1], alpha=0.5)
-        plt.xlabel(_xlabel[index])
-        plt.ylabel(name)
+        plt.xlabel(_xlabel[index], **font)
+        plt.ylabel(name, **font)
         plt.savefig(os.path.join(_output_dir, name.replace(' ', '_') + '.png'), dpi=350)
 
     if _stdout:
