@@ -64,31 +64,30 @@ class RNAJunctionTree:
         else:
             # reconstructed from the decoder
             self.nodes = kwargs.get('nodes')
-            is_valid = self.isvalid()
-            if not is_valid:
-                raise ValueError('Decoded RNA structure is not valid')
+            self.is_valid = self.isvalid()
 
-            self.free_energy = RNA.eval_structure_simple(''.join(self.rna_seq), self.rna_struct)
-            mfe_struct, mfe = RNA.fold(''.join(self.rna_seq))
+            if self.is_valid:
+                self.free_energy = RNA.eval_structure_simple(''.join(self.rna_seq), self.rna_struct)
+                self.mfe_struct, self.mfe = RNA.fold(''.join(self.rna_seq))
 
-            if np.abs(self.free_energy - mfe) < 1e-6:
-                self.is_mfe = True
-            else:
-                self.is_mfe = False
-                self.mfe_struct = mfe_struct
-                self.mfe = mfe
+                self.fe_deviation = np.abs(self.free_energy - self.mfe)
+
+                if self.fe_deviation < 1e-6:
+                    self.is_mfe = True
+                else:
+                    self.is_mfe = False
+
                 self.struct_hamming_dist = np.sum(
-                    np.array(list(self.rna_struct)) != np.array(list(mfe_struct)))
-                self.mfe_range = (mfe - self.free_energy) / mfe if mfe != 0 else None
+                    np.array(list(self.rna_struct)) != np.array(list(self.mfe_struct)))
 
-            self.get_junction_tree()
+                self.get_junction_tree()
 
     def isvalid(self):
         # check:
         # 1. equivalent amount of nucleotides on both sides of the stem
         # 2. valid base pairing
         # - canonical base pairs
-        # - G-U pairs and A-A pairs
+        # - G-U pairs are allowed
         # 3. valid number of branches in each hypernode element
         self.rna_struct = ['.'] * len(self.rna_seq)
         for node in self.nodes:

@@ -92,7 +92,7 @@ if __name__ == "__main__":
         '''load warm-up results'''
         if args.use_flow_prior:
             if args.use_attention:
-                weight_path = '/home/zichao/lstm_baseline_output/20200423-234937-cnf-flow-prior-maxpool-annealling/model.epoch-5'
+                weight_path = '/home/zichao/lstm_baseline_output/20200423-234937-cnf-flow-prior-maxpool-annealling/model.epoch-11'
             else:
                 weight_path = '/home/zichao/lstm_baseline_output/20200427-175431-cnf-flow-prior-no-att-aggr-anneal/model.epoch-5'
         else:
@@ -101,7 +101,7 @@ if __name__ == "__main__":
         model.load_state_dict(all_weights['model_weights'])
         optimizer.load_state_dict(all_weights['opt_weights'])
         print('Weights loaded from', weight_path)
-        epoch_to_start = 6
+        epoch_to_start = 12
     else:
         epoch_to_start = 1
 
@@ -262,35 +262,42 @@ if __name__ == "__main__":
             lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid, index=1)
 
+            ######################## sampling from the prior ########################
             sampled_latent_prior = torch.as_tensor(np.random.randn(1000, args.latent_size).astype(np.float32)).to(
                 device)
             if args.use_flow_prior:
                 sampled_latent_prior = model.latent_cnf(sampled_latent_prior, None, reverse=True).view(
                     *sampled_latent_prior.size())
 
+            ######################## evaluate prior with regularity constraints ########################
             prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=True)
             lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
+            ######################## evaluate prior without regularity constraints ########################
             prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=False)
             lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
+            ######################## evaluate prior without regularity constraints and greedy ########################
             prior_valid, prior_fe_deviation, decoded_seq, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
-                                                             enforce_rna_prior=False)
+                                                             enforce_rna_prior=False, prob_decode=False)
             decoded_seq = decoded_seq[:1000]
             lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
-            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / 10)
+            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / 10, index=1)
 
+            ######################## mutual information under the posterior ########################
             cur_mi = total_mi / nb_iters
             lib.plot_utils.plot('Validation_mutual_information', cur_mi, index=1)
 
+            ######################## Validation NLL ########################
             cur_nll_iw = nll_iw / nb_iters / valid_batch_size
             lib.plot_utils.plot('Validation_NLL_IW_100', cur_nll_iw, index=1)
 
+            ######################## active units ########################
             all_means = np.concatenate(all_means, axis=0)
             au_mean = np.mean(all_means, axis=0, keepdims=True)
             au_var = all_means - au_mean

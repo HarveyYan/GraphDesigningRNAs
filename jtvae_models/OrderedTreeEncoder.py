@@ -13,10 +13,14 @@ HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 # there is no need to encode/decode the pseudo start node
 HPN_FDIM = len(['H', 'I', 'M', 'S'])
 
-class TreeEncoder(nn.Module):
+NUC_VOCAB = ['A', 'C', 'G', 'U']
+NUC_FDIM = len(NUC_VOCAB)
+
+
+class OrderedTreeEncoder(nn.Module):
 
     def __init__(self, hidden_size, depth, **kwargs):
-        super(TreeEncoder, self).__init__()
+        super(OrderedTreeEncoder, self).__init__()
         self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.depth = depth
@@ -32,36 +36,16 @@ class TreeEncoder(nn.Module):
             ret.append(item.to(self.device))
         return ret
 
-    def forward(self, nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, diameter):
-        nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
-            self.send_to_device(nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph)
-        max_diameter = max(diameter)
-        nuc_emb = torch.cat([nuc_emebedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
-        f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).sum(dim=1)  # [nb_nodes, hidden_size]
-        f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
+    def forward(self, nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope,
+                diameter):
 
-        # ''' bilstm to add order information into the learnt node embeddings '''
-        # '''breadth first ordering of the nodes'''
-        # '''# minus the pseudo, not implemented'''
-        # all_len = list(np.array(scope)[:, 1])
-        # max_len = max(all_len)
-        # all_pre_padding_idx = np.concatenate(
-        #     [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)]).astype(np.long)
-        #
-        # batch_jt_vec = []
-        # for start_idx, length in scope:
-        #     batch_jt_vec.append(f_node[start_idx: start_idx + length])  # skip the pseudo node
-        #
-        # # [batch_size, max_len, hidden_size]
-        # padded_jt_vec = nn.utils.rnn.pad_sequence(batch_jt_vec, batch_first=True)
-        # packed_jt_vec = nn.utils.rnn.pack_padded_sequence(
-        #     padded_jt_vec, all_len, enforce_sorted=False, batch_first=True)
-        #
-        # output, _ = self.jt_order_lstm(packed_jt_vec)
-        #
-        # padded_jt_emb = nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[0]
-        # f_node = padded_jt_emb.view(-1, self.hidden_size). \
-        #     index_select(0, torch.as_tensor(all_pre_padding_idx).to(self.device))
+        f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
+            self.send_to_device(f_node_label, f_node_assignment, f_message, node_graph, message_graph)
+        max_diameter = max(diameter)
+
+        nuc_emb = torch.cat([nuc_emebedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
+        f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).sum(dim=1)  # [nb_segments, hidden_size]
+        f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
         ''' begin tree messages iteration'''
         messages = torch.zeros(message_graph.size(0), self.hidden_size).to(self.device)
@@ -71,16 +55,17 @@ class TreeEncoder(nn.Module):
         messages = self.GRU(messages, f_message, message_graph, max_diameter)  # bottom-up and top-down phases
 
         incoming_msg = index_select_ND(messages, 0, node_graph).sum(1)
+        f_node = index_select_ND(f_node, 0, node_graph).sum(1)
         hpn_embedding = torch.relu(self.output_w(torch.cat([f_node, incoming_msg], dim=-1)))
 
         ''' bilstm to add order information into the learnt node embeddings '''
-        # '''breadth first ordering of the nodes'''
-        all_len = list(np.array(scope)[:, 1] - 1)
+        '''depth first ordering of the nodes'''
+        all_len = list(np.array(scope)[:, 1])
         batch_size = len(scope)
 
         batch_jt_vec = []
         for start_idx, length in scope:
-            batch_jt_vec.append(hpn_embedding[start_idx + 1: start_idx + length])  # skip the pseudo node
+            batch_jt_vec.append(hpn_embedding[start_idx: start_idx + length])
 
         # [batch_size, max_len, hidden_size]
         padded_jt_vec = nn.utils.rnn.pad_sequence(batch_jt_vec, batch_first=True)
@@ -115,13 +100,12 @@ class TreeEncoder(nn.Module):
         messages, message_dict = [None], {}
         f_node_label = []
         f_node_assignment = []
-
+        all_nb_branches = []
+        all_depth_first_ordering = []
         tree_node_offset = 0
         graph_nuc_offset = 0
-        all_depth_first_ordering = []
 
         for tree in rna_tree_batch:
-            # depth.append(get_tree_height(np.array(tree.hp_adjmat.todense())))
             # graph diameter
             diameter.append(nx.diameter(nx.from_scipy_sparse_matrix(tree.hp_adjmat)))
             depth_first_order = sp.csgraph.depth_first_order(
@@ -129,25 +113,28 @@ class TreeEncoder(nn.Module):
             all_depth_first_ordering.extend(np.array(depth_first_order) + tree_node_offset)
             for node in np.array(tree.nodes):
                 onehot_enc = np.array(list(map(lambda x: x == node.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
-                f_node_label.append(torch.as_tensor(onehot_enc))
 
                 if type(node.nt_idx_assignment) is list:
                     nt_idx_assignment = node.nt_idx_assignment
                 else:
                     nt_idx_assignment = node.nt_idx_assignment.tolist()
-                # the nucleotides embeddings inside a subgraph are simply averaged
-                # todo better pooling tactics
-                if type(nt_idx_assignment[0]) is int:
-                    f_node_assignment.append([nt_idx + graph_nuc_offset for nt_idx in nt_idx_assignment])
-                else:
-                    f_node_assignment.append(list(np.concatenate(nt_idx_assignment, axis=0) + graph_nuc_offset))
 
-                if node.hpn_label != 'P':
-                    for neighbor_node in node.neighbors:
-                        if neighbor_node.hpn_label == 'P':  # skip the pseudo start node
-                            continue
-                        message_dict[(node.idx + tree_node_offset, neighbor_node.idx + tree_node_offset)] = len(messages)
-                        messages.append((node, neighbor_node, tree_node_offset))
+                if type(nt_idx_assignment[0]) is int:
+                    nb_branches = 1
+                    f_node_assignment.append([nt_idx + graph_nuc_offset for nt_idx in nt_idx_assignment])
+                    f_node_label.append(torch.as_tensor(onehot_enc))
+                else:
+                    nb_branches = len(nt_idx_assignment)
+                    f_node_assignment.extend(
+                        [[nt_idx + graph_nuc_offset for nt_idx in segment] for segment in
+                         nt_idx_assignment])
+                    f_node_label.extend([torch.as_tensor(onehot_enc)] * len(nt_idx_assignment))
+
+                all_nb_branches.append(nb_branches)
+
+                for nb_idx, neighbor_node in enumerate(node.neighbors):
+                    message_dict[(node.idx + tree_node_offset, neighbor_node.idx + tree_node_offset)] = len(messages)
+                    messages.append((node, neighbor_node, nb_idx, tree_node_offset))
 
             scope.append([tree_node_offset, len(tree.nodes)])
             tree_node_offset += len(tree.nodes)
@@ -158,15 +145,17 @@ class TreeEncoder(nn.Module):
         total_messages = len(messages)
         node_graph = [[] for i in range(total_nodes)]
         message_graph = [[] for i in range(total_messages)]
-        f_message = [total_nodes] * total_messages
+        f_message = [sum(all_nb_branches)] * total_messages
 
-        for node_from, node_to, tree_node_offset in messages[1:]:
+        for node_from, node_to, nb_idx, tree_node_offset in messages[1:]:
+            # nb_idx is the index of node_to in the neighborhood of node_from
             msg_idx = message_dict[(node_from.idx + tree_node_offset, node_to.idx + tree_node_offset)]
-            f_message[msg_idx] = node_from.idx + tree_node_offset
+
+            f_message[msg_idx] = sum(all_nb_branches[:node_from.idx + tree_node_offset]) + nb_idx
             # message passed from node_from to node_to
             node_graph[node_to.idx + tree_node_offset].append(msg_idx)
             for neighbor_node in node_to.neighbors:
-                if neighbor_node.idx == node_from.idx or neighbor_node.hpn_label == 'P':
+                if (neighbor_node.idx == node_from.idx and node_to.hpn_label != 'H') or neighbor_node.idx < node_from.idx:
                     continue
                 else:
                     necessary_msg_idx = message_dict[
@@ -193,6 +182,7 @@ class TreeEncoder(nn.Module):
         f_node_assignment = torch.as_tensor(np.array(f_node_assignment, dtype=np.long))
         f_message = torch.as_tensor(np.array(f_message, dtype=np.long))
 
+        # cannot pass large list to pytorch dataloader in multiprocessing setting
         return f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, diameter
 
 
@@ -215,7 +205,6 @@ class GraphGRU(nn.Module):
         mask[0] = 0  # first vector is padding
 
         for it in range(self.depth if unroll_depth is None else unroll_depth):
-
             msg_nei = index_select_ND(messages, 0, mess_graph)
             # [nb_msg, nb_neighbors, hidden_dim]
             sum_msg = msg_nei.sum(dim=1)

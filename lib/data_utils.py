@@ -76,20 +76,42 @@ def tensorize(tree_batch, TreeEncoder):
 
 
 if __name__ == "__main__":
-    from lib.tree_decomp import dfs_nt_traversal_check, get_tree_height
+    from lib.tree_decomp import dfs_nt_traversal_check, get_tree_height, dfs
     from tqdm import tqdm
     import matplotlib.pyplot as plt
     import numpy as np
 
     # sanity check on the traversal orders
-    # loader = JunctionTreeFolder('../data/rna_jt_32-512/train-split', 32, num_workers=8, shuffle=False)
-    # for batch in loader:
-    #     tree_batch, graph_encoder_input, tree_encoder_input = batch
-    #
-    #     for tree in tree_batch:
-    #         is_valid = dfs_nt_traversal_check(tree)
-    #         if not is_valid:
-    #             print('parsed tree invalid:', ''.join(tree.rna_seq))
+    loader = JunctionTreeFolder('../data/rna_jt_32-512/train-split', 32, num_workers=8, shuffle=False)
+    all_trace, max_trace = [], 0
+    total_batch = 0
+    for batch in loader:
+        tree_batch, graph_encoder_input, tree_encoder_input = batch
+
+        for tree in tree_batch:
+            s = []
+            dfs(s, tree.nodes[1], 0)  # skipping the pseudo node
+            all_trace.append(len(s))
+            if len(s) > max_trace:
+                max_trace = len(s)
+
+        total_batch += 1
+
+        if total_batch % 10000 == 0:
+            plt.hist(all_trace, bins=1000)
+            plt.title('max trace: %d' % (max_trace))
+            plt.xlabel('trace size')
+            plt.ylabel('count')
+            plt.savefig('all-trace-size.jpg', dpi=350)
+            plt.close()
+
+    print('max trace:', max_trace)
+        # for tree in tree_batch:
+        #     is_valid = dfs_nt_traversal_check(tree)
+        #     if not is_valid:
+        #         print('parsed tree invalid:', ''.join(tree.rna_seq))
+    exit()
+
     total_batch = 0
     all_length, all_tree_height, all_nb_nodes = [], [], []
     loader = JunctionTreeFolder(os.path.join(basedir, 'data/rna_jt_32-512/train-split'), 32, num_workers=8,
