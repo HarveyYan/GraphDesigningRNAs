@@ -5,6 +5,33 @@ from lib.tree_decomp import RNAJunctionTree
 model = None
 
 
+def assemble_subroutine(args):
+    rna_seq, all_nodes, successful = args
+    if successful is True:
+        tree = RNAJunctionTree(rna_seq, None, nodes=all_nodes)
+        if tree.is_valid is False:
+            return 'INVALID'
+        else:
+            return tree
+    else:
+        return successful
+
+def assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool=None):
+
+    if mp_pool is None:
+        all_parsed_trees = []
+        for rna_seq, all_nodes, successful in zip(all_rna_seq, all_trees, is_successful):
+            if successful is True:
+                all_parsed_trees.append(RNAJunctionTree(rna_seq, None, nodes=all_nodes))
+            else:
+                all_parsed_trees.append(successful)
+    else:
+        all_parsed_trees = list(mp_pool.imap(assemble_subroutine,
+                                             zip(all_rna_seq, all_trees, is_successful)))
+
+    return all_parsed_trees
+
+
 def posterior_check_subroutine(args):
     o_seq, o_struct, d_tree = args
     ret = [0, 0, 0]  # recon_acc, post_valid, post_fe_dev
@@ -44,7 +71,7 @@ def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, 
         t_z_vec, g_z_vec, prob_decode=True, enforce_topo_prior=enforce_rna_prior,
         enforce_hpn_prior=enforce_rna_prior, enforce_dec_prior=enforce_rna_prior)
 
-    all_parsed_trees = model.decoder.assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool)
+    all_parsed_trees = assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool)
 
     ret = list(mp_pool.imap(posterior_check_subroutine,
                             list(zip(original_sequence, original_structure,
@@ -79,7 +106,7 @@ def evaluate_prior(g_z_vec, t_z_vec, nb_samples, nb_decode, mp_pool, enforce_rna
         t_z_vec, g_z_vec, prob_decode=prob_decode, enforce_topo_prior=enforce_rna_prior,
         enforce_hpn_prior=enforce_rna_prior, enforce_dec_prior=enforce_rna_prior)
 
-    all_parsed_trees = model.decoder.assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool)
+    all_parsed_trees = assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool)
 
     ret = np.array(list(mp_pool.imap(prior_check_subroutine,
                                      all_parsed_trees)))

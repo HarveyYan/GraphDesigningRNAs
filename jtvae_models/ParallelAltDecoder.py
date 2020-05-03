@@ -86,7 +86,7 @@ class UnifiedDecoder(nn.Module):
         # self.graph_vector_linear = nn.Linear(self.latent_size, self.hidden_size // 2)
 
         self.concat_squash_linear = nn.Linear(self.hidden_size + self.latent_size, self.hidden_size)
-        self.decode_nuc_with_lstm = kwargs.get('decode_nuc_with_lstm', False)
+        self.decode_nuc_with_lstm = kwargs.get('decode_nuc_with_lstm', True)
         if not self.decode_nuc_with_lstm:
             # GRU Weights for nucleotide decoding
             self.W_z_nuc = nn.Linear(hidden_size + len(NUC_VOCAB), hidden_size)
@@ -536,7 +536,9 @@ class UnifiedDecoder(nn.Module):
         tensor_batch_list = torch.as_tensor(batch_list).to(self.device)
         last_token = last_token.index_select(0, tensor_batch_list)
         hidden_state = torch.relu(self.concat_squash_linear(torch.cat([hidden_state, graph_latent_vec], dim=-1)))
+        cell_memory_ph = torch.zeros_like(hidden_state)
         hidden_state = hidden_state.index_select(0, tensor_batch_list)
+        cell_memory_ph = cell_memory_ph.index_select(0, tensor_batch_list)
         tree_latent_vec = tree_latent_vec.index_select(0, tensor_batch_list)
         graph_latent_vec = graph_latent_vec.index_select(0, tensor_batch_list)
 
@@ -574,7 +576,7 @@ class UnifiedDecoder(nn.Module):
 
             '''decode one position'''
             if self.decode_nuc_with_lstm:
-                hidden_state, graph_latent_vec = self.lstm_cell(last_token, (hidden_state, graph_latent_vec))
+                hidden_state, cell_memory_ph = self.lstm_cell(last_token, (hidden_state, cell_memory_ph))
             else:
                 hidden_state = GRU(last_token, hidden_state, self.W_z_nuc, self.W_r_nuc, self.W_h_nuc)
 
@@ -616,6 +618,7 @@ class UnifiedDecoder(nn.Module):
 
             last_token = torch.as_tensor(tmp_last_token).to(self.device)
             hidden_state = hidden_state.index_select(0, tensor_cont_translation_idx)
+            cell_memory_ph = cell_memory_ph.index_select(0, tensor_cont_translation_idx)
             tree_latent_vec = tree_latent_vec.index_select(0, tensor_cont_translation_idx)
             graph_latent_vec = graph_latent_vec.index_select(0, tensor_cont_translation_idx)
             batch_list = batch_list[cont_translation_idx]
@@ -1071,36 +1074,8 @@ class UnifiedDecoder(nn.Module):
                 is_successful[i] = 'TREE_ITER_EXCEED_MAXIMUM'
 
         for all_nodes, successful in zip(all_trees, is_successful):
-            if successful is True:
-                for node in all_nodes:
-                    if hasattr(node, 'segment_features'):
-                        del node.segment_features
+            for node in all_nodes:
+                if hasattr(node, 'segment_features'):
+                    del node.segment_features
 
         return all_rna_seq, all_trees, is_successful
-
-    @staticmethod
-    def assemble_subroutine(args):
-        rna_seq, all_nodes, successful = args
-        if successful is True:
-            tree = RNAJunctionTree(rna_seq, None, nodes=all_nodes)
-            if tree.is_valid is False:
-                return 'INVALID'
-            else:
-                return tree
-        else:
-            return successful
-
-    def assemble_trees(self, all_rna_seq, all_trees, is_successful, mp_pool=None):
-
-        if mp_pool is None:
-            all_parsed_trees = []
-            for rna_seq, all_nodes, successful in zip(all_rna_seq, all_trees, is_successful):
-                if successful is True:
-                    all_parsed_trees.append(RNAJunctionTree(rna_seq, None, nodes=all_nodes))
-                else:
-                    all_parsed_trees.append(successful)
-        else:
-            all_parsed_trees = list(mp_pool.imap(UnifiedDecoder.assemble_subroutine,
-                                                 zip(all_rna_seq, all_trees, is_successful)))
-
-        return all_parsed_trees
