@@ -12,7 +12,7 @@ from multiprocessing import Pool
 
 from jtvae_models.VAE import JunctionTreeVAE
 from lib.data_utils import JunctionTreeFolder
-import lib.plot_utils
+import lib.plot_utils, lib.logger
 import jtvae_models.jtvae_utils
 from jtvae_models.jtvae_utils import *
 
@@ -33,7 +33,7 @@ parser.add_argument('--max_beta', type=float, default=1.0)
 parser.add_argument('--epoch', type=int, default=10)
 # parser.add_argument('--anneal_rate', type=float, default=0.9)
 parser.add_argument('--print_iter', type=int, default=1000)
-parser.add_argument('--tree_encoder_arch', type=str, default='ordnuc')
+parser.add_argument('--tree_encoder_arch', type=str, default='baseline')
 parser.add_argument('--warmup_epoch', type=int, default=1)
 parser.add_argument('--use_flow_prior', type=eval, default=True, choices=[True, False])
 parser.add_argument('--limit_data', type=int, default=None)
@@ -46,7 +46,8 @@ if __name__ == "__main__":
     print(args)
 
     model = JunctionTreeVAE(args.hidden_size, args.latent_size, args.depthT, args.depthG,
-                            decode_nuc_with_lstm=True, device=device, tree_encoder_arch=args.tree_encoder_arch).to(
+                            decode_nuc_with_lstm=True, device=device, tree_encoder_arch=args.tree_encoder_arch,
+                            use_flow_prior=args.use_flow_prior).to(
         device)
     print(model)
     for param in model.parameters():
@@ -112,8 +113,8 @@ if __name__ == "__main__":
 
             hpn_pred_acc, stop_translation_nuc_acc, ord_nuc_acc, all_nuc_pred_acc, stop_acc = \
                 ret_dict['nb_hpn_pred_correct'] / ret_dict['nb_hpn_targets'], \
-                ret_dict['stop_translation_nuc_acc'] / ret_dict['nb_stop_trans_targets'], \
-                ret_dict['ord_nuc_acc'] / ret_dict['nb_ord_nuc_targets'], \
+                ret_dict['nb_stop_trans_pred_correct'] / ret_dict['nb_stop_trans_targets'], \
+                ret_dict['nb_ord_nuc_pred_correct'] / ret_dict['nb_ord_nuc_targets'], \
                 ret_dict['nb_nuc_pred_correct'] / ret_dict['nb_nuc_targets'], \
                 ret_dict['nb_stop_pred_correct'] / ret_dict['nb_stop_targets'],
 
@@ -226,8 +227,8 @@ if __name__ == "__main__":
 
                 valid_node_acc, valid_nuc_stop_acc, valid_nuc_ord_acc, valid_nuc_acc, valid_topo_acc = \
                     ret_dict['nb_hpn_pred_correct'] / ret_dict['nb_hpn_targets'], \
-                    ret_dict['stop_translation_nuc_acc'] / ret_dict['nb_stop_trans_targets'], \
-                    ret_dict['ord_nuc_acc'] / ret_dict['nb_ord_nuc_targets'], \
+                    ret_dict['nb_stop_trans_pred_correct'] / ret_dict['nb_stop_trans_targets'], \
+                    ret_dict['nb_ord_nuc_pred_correct'] / ret_dict['nb_ord_nuc_targets'], \
                     ret_dict['nb_nuc_pred_correct'] / ret_dict['nb_nuc_targets'], \
                     ret_dict['nb_stop_pred_correct'] / ret_dict['nb_stop_targets'],
 
@@ -263,21 +264,22 @@ if __name__ == "__main__":
         sampled_t_z = sampled_z[:, args.latent_size:]
 
         ######################## evaluate prior with regularity constraints ########################
-        prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 10, mp_pool,
-                                                               enforce_rna_prior=True)
+        prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 10, mp_pool,
+                                                            enforce_rna_prior=True)
         lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
         lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
         ######################## evaluate prior without regularity constraints ########################
-        prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 10, mp_pool,
-                                                               enforce_rna_prior=False)
+        prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 10, mp_pool,
+                                                            enforce_rna_prior=False)
         lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
         lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
         ######################## evaluate prior without regularity constraints and greedy ########################
-        prior_valid, prior_fe_deviation, decoded_seq, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 10, mp_pool,
-                                                                         enforce_rna_prior=False, prob_decode=False)
-        decoded_seq = decoded_seq[:1000]
+        prior_valid, prior_fe_deviation, parsed_trees = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 10, mp_pool,
+                                                                       enforce_rna_prior=False, prob_decode=False)
+        decoded_seq = [''.join(tree.rna_seq) for tree in parsed_trees[:1000] if
+                       type(tree) is RNAJunctionTree and tree.is_valid]
         lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
         lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
                             index=1)

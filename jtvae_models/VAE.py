@@ -7,7 +7,7 @@ from jtvae_models.TreeEncoder import TreeEncoder
 from jtvae_models.ParallelAltDecoder import UnifiedDecoder
 from jtvae_models.OrderedTreeEncoder import OrderedTreeEncoder
 
-from cnf_models.networks import get_latent_cnf
+from cnf_models.flow import get_latent_cnf
 from lib.nn_utils import log_sum_exp
 
 
@@ -23,6 +23,7 @@ class JunctionTreeVAE(nn.Module):
         self.tree_encoder_arch = kwargs.get('tree_encoder_arch', 'baseline')
         assert self.tree_encoder_arch in ['baseline', 'ordnuc'], 'selected tree encoder arch \'%s\' is not unknown' % (
             self.tree_encoder_arch)
+        self.use_flow_prior = kwargs.get('use_flow_prior', True)
 
         self.g_encoder = GraphEncoder(self.hidden_dim, self.depthG, **kwargs)
         self.g_mean = nn.Linear(hidden_dim, latent_dim)
@@ -58,7 +59,7 @@ class JunctionTreeVAE(nn.Module):
 
     def encode(self, g_encoder_input, t_encoder_input):
         nuc_embedding, graph_vectors = self.g_encoder(*g_encoder_input)
-        enc_tree_messages, tree_vectors = self.t_encoder(nuc_embedding, *t_encoder_input)
+        tree_vectors = self.t_encoder(nuc_embedding, *t_encoder_input)
         return graph_vectors, tree_vectors
 
     def rsample(self, graph_latent_vec, tree_latent_vec, nsamples=1):
@@ -73,7 +74,7 @@ class JunctionTreeVAE(nn.Module):
         z_log_var = torch.cat([graph_z_log_var, tree_z_log_var], dim=-1)
 
         entropy = self.gaussian_entropy(z_log_var)  # batch_size,
-        z_vecs = self.reparameterize(z_mean, z_log_var, nsamples).reshape(batch_size * nsamples, self.latent_size * 2)
+        z_vecs = self.reparameterize(z_mean, z_log_var, nsamples).reshape(batch_size * nsamples, self.latent_dim * 2)
 
         if self.use_flow_prior:
             w, delta_log_pw = self.latent_cnf(z_vecs, None, torch.zeros(batch_size * nsamples, 1).to(z_vecs))
@@ -83,9 +84,9 @@ class JunctionTreeVAE(nn.Module):
         else:
             log_pz = self.standard_normal_logprob(z_vecs).reshape(batch_size, nsamples, 1)
 
-        z_vecs = z_vecs.reshape(batch_size, nsamples, self.latent_size * 2)
-        graph_z_vecs = z_vecs[:, :, :self.latent_size]
-        tree_z_vecs = z_vecs[:, :, self.latent_size:]
+        z_vecs = z_vecs.reshape(batch_size, nsamples, self.latent_dim * 2)
+        graph_z_vecs = z_vecs[:, :, :self.latent_dim]
+        tree_z_vecs = z_vecs[:, :, self.latent_dim:]
 
         return (z_vecs, graph_z_vecs, tree_z_vecs), (entropy, log_pz)
 
@@ -204,8 +205,8 @@ class JunctionTreeVAE(nn.Module):
             (z_vec, graph_z_vec, tree_z_vec), (entropy, log_pz) = self.rsample(graph_vectors, tree_vectors, ns)
 
             # [batch, ns], log p(x,z)
-            graph_z_vec_reshaped = graph_z_vec.reshape(batch_size * ns, self.latent_size)
-            tree_z_vec_reshaped = tree_z_vec.reshape(batch_size * ns, self.latent_size)
+            graph_z_vec_reshaped = graph_z_vec.reshape(batch_size * ns, self.latent_dim)
+            tree_z_vec_reshaped = tree_z_vec.reshape(batch_size * ns, self.latent_dim)
             rep_tree_batch = [i for rna in tree_batch for i in [rna] * ns]
             ret_dict = self.decoder(rep_tree_batch, tree_z_vec_reshaped, graph_z_vec_reshaped)
             recon_log_prob = - ret_dict['batch_nuc_pred_loss'].reshape(batch_size, ns) - \

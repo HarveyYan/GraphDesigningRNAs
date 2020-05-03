@@ -94,7 +94,7 @@ class GraphEncoder(nn.Module):
             representation.append(torch.max(nuc_embedding[start: start + length], dim=0)[0])
             start += length
 
-        return torch.stack(representation, dim=0)
+        return nuc_embedding, torch.stack(representation, dim=0)
 
     @staticmethod
     def prepare_batch_data(rna_mol_batch):

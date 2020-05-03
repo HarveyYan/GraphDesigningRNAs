@@ -1,8 +1,6 @@
-import re
-import forgi.graph.bulge_graph as fgb
-import RNA
 import numpy as np
 import torch
+from lib.tree_decomp import RNAJunctionTree
 
 model = None
 
@@ -10,7 +8,7 @@ model = None
 def posterior_check_subroutine(args):
     o_seq, o_struct, d_tree = args
     ret = [0, 0, 0]  # recon_acc, post_valid, post_fe_dev
-    if d_tree.is_valid:
+    if type(d_tree) is RNAJunctionTree and d_tree.is_valid:
         ret[1] = 1
         if ''.join(d_tree.rna_seq) == o_seq and ''.join(d_tree.rna_struct) == o_struct:
             ret[0] = 1
@@ -62,7 +60,7 @@ def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, 
 
 def prior_check_subroutine(d_tree):
     ret = [0, 0]  # prior_valid, prior_fe_dev
-    if d_tree.is_valid:
+    if type(d_tree) is RNAJunctionTree and d_tree.is_valid:
         ret[0] = 1
         ret[1] = d_tree.fe_deviation
     return ret

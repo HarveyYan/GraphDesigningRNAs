@@ -24,7 +24,7 @@ allowed_hpn_transition = [[False, False, False, False],
                           [False, False, False, True],
                           [True, True, True, False]]
 
-MAX_TREE_DECODE_STEPS = 200
+MAX_TREE_DECODE_STEPS = 300
 MAX_SEGMENT_LENGTH = 100
 MIN_HAIRPIN_LENGTH = 3
 
@@ -166,7 +166,7 @@ class UnifiedDecoder(nn.Module):
         segment_representation = []
         start = 0
         for length in all_len:
-            segment_representation.append(torch.max(all_hidden_states[start: length], dim=0)[0])
+            segment_representation.append(torch.max(all_hidden_states[start: start + length], dim=0)[0])
             start += length
 
         batch_idx = [c for i, length in enumerate(all_len) for c in [i] * length]
@@ -285,7 +285,7 @@ class UnifiedDecoder(nn.Module):
                     all_nuc_label.append(NUC_VOCAB.index(nuc))
                 all_nuc_label.append(NUC_VOCAB.index('<'))
                 all_seq_input.append(seq_input)
-                nuc_batch_idx.extend([batch_idx] * len(all_nuc_label))
+                nuc_batch_idx.extend([batch_idx] * len(seq_input))
 
             tensor_batch_list = torch.as_tensor(np.array(batch_list, dtype=np.long)).to(self.device)
             batch_graph_latent_vec = graph_latent_vec.index_select(0, tensor_batch_list)
@@ -370,7 +370,7 @@ class UnifiedDecoder(nn.Module):
                 seq_input = [nuc_padding]  # start token
             else:
                 seq_input = []
-            for nuc_idx, nuc in enumerate([node_x.rna_seq[nt_idx] for nt_idx in root_node_nt_idx]):
+            for nuc_idx, nuc in enumerate([rna_tree_batch[batch_idx].rna_seq[nt_idx] for nt_idx in root_node_nt_idx]):
                 onehot_enc = np.array(list(map(lambda x: x == nuc, NUC_VOCAB)), dtype=np.float32)
                 seq_input.append(onehot_enc)
                 if nuc_idx == 0 and node_x.hpn_label != 'H':
@@ -378,7 +378,7 @@ class UnifiedDecoder(nn.Module):
                 all_nuc_label.append(NUC_VOCAB.index(nuc))
             all_nuc_label.append(NUC_VOCAB.index('<'))
             all_seq_input.append(seq_input)
-            nuc_batch_idx.extend([batch_idx] * len(all_nuc_label))
+            nuc_batch_idx.extend([batch_idx] * len(seq_input))
 
         hpn_label = torch.stack(hpn_label, dim=0)
         segment_local_field = torch.stack(segment_local_field, dim=0)
@@ -994,7 +994,7 @@ class UnifiedDecoder(nn.Module):
                     if is_successful[batch_idx] is True:
                         is_successful[batch_idx] = list_is_successful[i]
                     else:
-                        is_successful[batch_idx] += '|'+list_is_successful[i]
+                        is_successful[batch_idx] += '|' + list_is_successful[i]
                 if is_successful[batch_idx] is not True:
                     continue
                 node_x = list_current_node[i]
@@ -1060,7 +1060,6 @@ class UnifiedDecoder(nn.Module):
                                   node_x.decoded_segment[-1]))
                         print('all seq:', all_rna_seq[batch_idx])
                         print('size of stack:', len(all_stacks[batch_idx]))
-
 
         for i in range(batch_size):
             node_x, last_token, last_token_idx = all_stacks[i][-1]
