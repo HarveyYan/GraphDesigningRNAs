@@ -20,7 +20,7 @@ class RBP_EMB_Classifier(nn.Module):
     def forward(self, batch_input, batch_label):
         batch_size = len(batch_input)
         batch_input = batch_input.to(self.device)
-        batch_label = torch.as_tensor(batch_label).to(self.device)
+        batch_label = torch.as_tensor(batch_label.astype(np.float32)).to(self.device)
         preds = self.classifier_output(torch.relu(self.classifier_nonlinear(batch_input)))
 
         loss = self.loss(preds, batch_label)

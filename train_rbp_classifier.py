@@ -5,14 +5,16 @@ import torch.optim as optim
 import datetime
 from sklearn.metrics import roc_auc_score, average_precision_score
 import numpy as np
+from multiprocessing import Pool
 
+import rbp_probe_modules.rbp_dataloader
 from rbp_probe_modules.rbp_dataloader import RBPFolder
 from rbp_probe_modules.rbp_classifier import RBP_EMB_Classifier
 import lib.plot_utils, lib.logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--save_dir', required=True)
-parser.add_argument('--hidden_size', type=int, default=450)
+parser.add_argument('--hidden_size', type=int, default=64)
 parser.add_argument('--batch_size', type=int, default=32)
 
 parser.add_argument('--lr', type=float, default=1e-3)
@@ -25,12 +27,13 @@ all_output_size = {
     'data_RBPshigh.h5': 11
 }
 
-expr_investigate = '~/lstm_baseline_output/20200429-222820-flow-prior-resumed-5e-4-1e-2'
+expr_investigate = '/home/zichao/lstm_baseline_output/20200429-222820-flow-prior-resumed-5e-4-1e-2'
 epochs_to_load = []
 for dirname in os.listdir(expr_investigate):
     if dirname.startswith('model'):
         epochs_to_load.append(int(dirname.split('-')[-1]))
 epochs_to_load = list(np.sort(epochs_to_load))
+
 
 def evaluate(loader):
     all_loss, all_preds, all_label = 0., [], []
@@ -38,7 +41,7 @@ def evaluate(loader):
     with torch.no_grad():
         for latent_vec, label in loader:
             # compute various metrics
-            ret_dict = rbp_probe(latent_vec, all_label)
+            ret_dict = rbp_probe(latent_vec, label)
             loss = ret_dict['loss'] / ret_dict['nb_preds']
             all_loss += loss.item()
             preds = ret_dict['preds']
@@ -64,6 +67,7 @@ def evaluate(loader):
 
         return all_loss, cate_roc_auc, cate_ap
 
+
 if __name__ == "__main__":
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -80,8 +84,8 @@ if __name__ == "__main__":
     all_test_loss, all_test_roc, all_test_ap = [], [], []
 
     for enc_epoch_to_load in epochs_to_load:
-
-        rbp_probe = RBP_EMB_Classifier(input_size, args.hidden_size, output_size)
+        rbp_probe = RBP_EMB_Classifier(input_size, args.hidden_size, output_size, device=device).to(device)
+        print(rbp_probe)
         optimizer = optim.Adam(rbp_probe.parameters(), lr=args.lr)
 
         enc_epoch_weight_path = os.path.join(expr_investigate, 'model.epoch-%d' % enc_epoch_to_load)
@@ -104,12 +108,24 @@ if __name__ == "__main__":
         best_valid_loss = np.inf
         best_valid_weight_path = None
 
+        mp_pool = Pool(8)
+
+        train_loader = RBPFolder(args.dataset_name, args.batch_size, num_workers=4,
+                                 mode='train', weight_path=enc_epoch_weight_path, device=device,
+                                 mp_pool=mp_pool)
+
+        valid_loader = RBPFolder(args.dataset_name, args.batch_size, num_workers=4,
+                                 shuffle=False, mode='valid', weight_path=enc_epoch_weight_path,
+                                 device=device, mp_pool=mp_pool)
+
+        test_loader = RBPFolder(args.dataset_name, args.batch_size, num_workers=4,
+                                shuffle=False, mode='test', weight_path=enc_epoch_weight_path,
+                                device=device, mp_pool=mp_pool)
+
         for epoch in range(1, args.epoch + 1):
-            loader = RBPFolder(args.dataset_name, args.batch_size, num_workers=4,
-                               mode='train', weight_path=enc_epoch_weight_path)
 
             # training loop
-            for latent_vec, label in loader:
+            for latent_vec, label in train_loader:
                 rbp_probe.zero_grad()
 
                 ret_dict = rbp_probe(latent_vec, label)
@@ -118,15 +134,8 @@ if __name__ == "__main__":
                 optimizer.step()
 
             # validation loop
-            loader = RBPFolder(args.dataset_name, args.batch_size, num_workers=4,
-                               shuffle=False, mode='train', weight_path=enc_epoch_weight_path)
-
-            train_loss, train_roc_auc, train_ap_score = evaluate(loader)
-
-            loader = RBPFolder(args.dataset_name, args.batch_size, num_workers=4,
-                               shuffle=False, mode='valid', weight_path=enc_epoch_weight_path)
-
-            valid_loss, valid_roc_auc, valid_ap_score = evaluate(loader)
+            train_loss, train_roc_auc, train_ap_score = evaluate(train_loader)
+            valid_loss, valid_roc_auc, valid_ap_score = evaluate(valid_loader)
 
             lib.plot_utils.plot('train_loss', train_loss)
             lib.plot_utils.plot('averaged_train_roc_score', train_roc_auc.mean())
@@ -140,6 +149,15 @@ if __name__ == "__main__":
             lib.plot_utils.flush()
             lib.plot_utils.tick(index=0)
 
+            save_dict = {'epoch': epoch, 'train_loss': train_loss, 'valid_loss': valid_loss}
+            for cate_idx in range(output_size):
+                save_dict['train_roc_score_%d' % (cate_idx)] = train_roc_auc[cate_idx]
+                save_dict['valid_roc_score_%d' % (cate_idx)] = valid_roc_auc[cate_idx]
+                save_dict['train_ap_score_%d' % (cate_idx)] = train_ap_score[cate_idx]
+                save_dict['valid_ap_score_%d' % (cate_idx)] = valid_ap_score[cate_idx]
+
+            logger.update_with_dict(save_dict)
+
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
                 best_valid_weight_path = os.path.join(save_dir, "model.epoch-" + str(epoch))
@@ -152,9 +170,7 @@ if __name__ == "__main__":
             print('Loading best weights from: %s' % (best_valid_weight_path))
             rbp_probe.load_state_dict(torch.load(best_valid_weight_path)['model_weights'])
 
-        loader = RBPFolder(args.dataset_name, args.batch_size, num_workers=4,
-                           shuffle=False, mode='test', weight_path=enc_epoch_weight_path)
-        test_loss, test_roc_auc, test_ap_score = evaluate(loader)
+        test_loss, test_roc_auc, test_ap_score = evaluate(test_loader)
 
         all_test_loss.append(test_loss)
         all_test_roc.append(test_roc_auc)
@@ -171,8 +187,13 @@ if __name__ == "__main__":
         lib.plot_utils.flush()
         lib.plot_utils.tick(index=1)
 
+        del rbp_probe_modules.rbp_dataloader.model
+        rbp_probe_modules.rbp_dataloader.model = None
+
     np.savetxt(os.path.join(save_dir, 'all_test_loss'), all_test_loss)
     np.savetxt(os.path.join(save_dir, 'all_test_roc_scores'), all_test_roc)
     np.savetxt(os.path.join(save_dir, 'all_test_ap_scores'), all_test_ap)
 
-
+    if mp_pool is not None:
+        mp_pool.close()
+        mp_pool.join()
