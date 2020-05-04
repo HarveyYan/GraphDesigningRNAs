@@ -92,7 +92,7 @@ if __name__ == "__main__":
     jtvae_models.jtvae_utils.model = model
 
     for epoch in range(1, args.epoch + 1):
-        loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', args.batch_size,
+        loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
                                     num_workers=4, tree_encoder_arch=args.tree_encoder_arch)
         for batch in loader:
             total_step += 1

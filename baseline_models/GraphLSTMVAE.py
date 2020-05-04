@@ -538,7 +538,8 @@ class GraphLSTMVAE(nn.Module):
                 'rtol': 1e-5,
                 'batch_norm': False,
                 'bn_lag': 0,
-                'sync_bn': False
+                'sync_bn': False,
+                'device': self.device
             }
             self.latent_cnf = get_latent_cnf(self.flow_args)
 

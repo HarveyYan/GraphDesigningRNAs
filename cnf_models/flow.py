@@ -84,6 +84,6 @@ def get_point_cnf(args):
 
 def get_latent_cnf(args):
     dims = tuple(map(int, args['latent_dims'].split("-")))
-    model = build_model(args, args['zdim'], dims, 0, args['latent_num_blocks'], False).cuda()
+    model = build_model(args, args['zdim'], dims, 0, args['latent_num_blocks'], False).to(args['device'])
     print("Number of trainable parameters of Latent CNF: {}".format(count_parameters(model)))
     return model

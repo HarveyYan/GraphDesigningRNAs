@@ -13,9 +13,6 @@ HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 # there is no need to encode/decode the pseudo start node
 HPN_FDIM = len(['H', 'I', 'M', 'S'])
 
-NUC_VOCAB = ['A', 'C', 'G', 'U']
-NUC_FDIM = len(NUC_VOCAB)
-
 
 class OrderedTreeEncoder(nn.Module):
 
@@ -36,15 +33,14 @@ class OrderedTreeEncoder(nn.Module):
             ret.append(item.to(self.device))
         return ret
 
-    def forward(self, nuc_emebedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope,
+    def forward(self, nuc_embedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope,
                 diameter):
 
         f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
             self.send_to_device(f_node_label, f_node_assignment, f_message, node_graph, message_graph)
         max_diameter = max(diameter)
-
-        nuc_emb = torch.cat([nuc_emebedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
-        f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).sum(dim=1)  # [nb_segments, hidden_size]
+        nuc_emb = torch.cat([nuc_embedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
+        f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).max(dim=1)  # [nb_segments, hidden_size]
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
         ''' begin tree messages iteration'''
@@ -155,7 +151,8 @@ class OrderedTreeEncoder(nn.Module):
             # message passed from node_from to node_to
             node_graph[node_to.idx + tree_node_offset].append(msg_idx)
             for neighbor_node in node_to.neighbors:
-                if (neighbor_node.idx == node_from.idx and node_to.hpn_label != 'H') or neighbor_node.idx < node_from.idx:
+                if (
+                        neighbor_node.idx == node_from.idx and node_to.hpn_label != 'H') or neighbor_node.idx < node_from.idx:
                     continue
                 else:
                     necessary_msg_idx = message_dict[

@@ -905,13 +905,14 @@ class UnifiedDecoder(nn.Module):
             node_incoming_msg = GraphGRU(local_field, node_incoming_msg,
                                          self.W_z_mp, self.W_r_mp, self.U_r_mp, self.W_h_mp)
 
-            '''topological prediction'''
+            ''' topological prediction '''
             stop_score = self.aggregate(node_incoming_msg, 'stop')
             if prob_decode:
                 backtrack = (torch.bernoulli(torch.sigmoid(stop_score)).cpu().detach().numpy() == 0)[:, 0]
             else:
                 backtrack = (stop_score.cpu().detach().numpy() < 0)[:, 0]
-            backtrack = list(backtrack)
+            ''' convert numpy.bool_ to python bool '''
+            backtrack = [bool(back) for back in backtrack]
 
             if enforce_topo_prior:
                 for i, batch_idx in enumerate(batch_list):
