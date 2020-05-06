@@ -15,6 +15,7 @@ import lib.plot_utils, lib.logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--save_dir', required=True)
+parser.add_argument('--expr_path', type=str, default='/home/zichao/lstm_baseline_output/20200429-223941-flow-prior-limited-data-10-1e-4-1e-2')
 parser.add_argument('--hidden_size', type=int, default=256)
 parser.add_argument('--batch_size', type=int, default=32)
 
@@ -27,14 +28,6 @@ all_output_size = {
     'data_RBPsmed.h5': 21,
     'data_RBPshigh.h5': 11
 }
-
-expr_investigate = '/home/zichao/lstm_baseline_output/20200429-222820-flow-prior-resumed-5e-4-1e-2'
-epochs_to_load = []
-for dirname in os.listdir(expr_investigate):
-    if dirname.startswith('model'):
-        epochs_to_load.append(int(dirname.split('-')[-1]))
-epochs_to_load = list(np.sort(epochs_to_load))
-
 
 def evaluate(loader):
     all_loss, nb_preds, all_preds, all_label = 0., 0., [], []
@@ -74,6 +67,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     print(args)
+
+    expr_investigate = args.expr_path
+    assert os.path.exists(expr_investigate), '%s does not exist' % (expr_investigate)
+    epochs_to_load = []
+    for dirname in os.listdir(expr_investigate):
+        if dirname.startswith('model'):
+            epochs_to_load.append(int(dirname.split('-')[-1]))
+    epochs_to_load = list(np.sort(epochs_to_load))
 
     input_size = 128  # latent dimension
     output_size = all_output_size[args.dataset_name]
@@ -199,21 +200,21 @@ if __name__ == "__main__":
     font = {'fontname': 'Times New Roman', 'size': 14}
     plt.clf()
     plt.figure(figsize=(5., 5.))
-    plt.plot(epochs_to_load, all_test_loss)
+    plt.plot(all_test_loss)
     plt.xlabel('epoch', **font)
     plt.ylabel('test loss', **font)
     plt.savefig(os.path.join(save_dir, 'test_loss.png'), dpi=350)
 
     plt.clf()
     plt.figure(figsize=(5., 5.))
-    plt.plot(epochs_to_load, [test_roc_auc.mean() for test_roc_auc in all_test_roc])
+    plt.plot([test_roc_auc.mean() for test_roc_auc in all_test_roc])
     plt.xlabel('epoch', **font)
     plt.ylabel('averaged_test_roc_score', **font)
     plt.savefig(os.path.join(save_dir, 'averaged_test_roc_score.png'), dpi=350)
 
     plt.clf()
     plt.figure(figsize=(5., 5.))
-    plt.plot(epochs_to_load, [test_ap_score.mean() for test_ap_score in all_test_ap])
+    plt.plot([test_ap_score.mean() for test_ap_score in all_test_ap])
     plt.xlabel('epoch', **font)
     plt.ylabel('averaged_test_ap_score', **font)
     plt.savefig(os.path.join(save_dir, 'averaged_test_ap_score.png'), dpi=350)

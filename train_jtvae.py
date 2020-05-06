@@ -95,8 +95,6 @@ if __name__ == "__main__":
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
                                     num_workers=8, tree_encoder_arch=args.tree_encoder_arch)
         for batch in loader:
-            if total_step == 10:
-                break
             total_step += 1
             model.zero_grad()
             ret_dict = model(batch)

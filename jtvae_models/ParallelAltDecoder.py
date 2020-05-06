@@ -52,8 +52,8 @@ def GRU(x, h, W_z, W_r, W_h):
 
 def GraphGRU(x, h_nei, W_z, W_r, U_r, W_h):
     hidden_size = W_r.out_features
-    sum_h = h_nei.sum(dim=1)
-    z_input = torch.cat([x, sum_h], dim=1)
+    max_h = h_nei.max(dim=1)[0]
+    z_input = torch.cat([x, max_h], dim=1)
     z = torch.sigmoid(W_z(z_input))
 
     r_1 = W_r(x).view(-1, 1, hidden_size)
@@ -61,10 +61,10 @@ def GraphGRU(x, h_nei, W_z, W_r, U_r, W_h):
     r = torch.sigmoid(r_1 + r_2)
 
     gated_h = r * h_nei
-    sum_gated_h = gated_h.sum(dim=1)
-    h_input = torch.cat([x, sum_gated_h], dim=1)
+    max_gated_h = gated_h.max(dim=1)[0]
+    h_input = torch.cat([x, max_gated_h], dim=1)
     pre_h = torch.tanh(W_h(h_input))
-    new_h = (1.0 - z) * sum_h + z * pre_h
+    new_h = (1.0 - z) * max_h + z * pre_h
     return new_h
 
 
@@ -85,7 +85,7 @@ class UnifiedDecoder(nn.Module):
         # self.tree_vector_linear = nn.Linear(self.latent_size, self.hidden_size // 2)
         # self.graph_vector_linear = nn.Linear(self.latent_size, self.hidden_size // 2)
 
-        self.concat_squash_linear = nn.Linear(self.hidden_size + self.latent_size, self.hidden_size)
+        self.concat_squash_linear = nn.Linear(self.hidden_size + self.latent_size * 2, self.hidden_size)
         self.decode_nuc_with_lstm = kwargs.get('decode_nuc_with_lstm', True)
         if not self.decode_nuc_with_lstm:
             # GRU Weights for nucleotide decoding
@@ -140,7 +140,7 @@ class UnifiedDecoder(nn.Module):
             [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)]).astype(np.long)
 
         '''concat the volatile hidden states with a reference graph latent vector'''
-        hidden_states = torch.relu(self.concat_squash_linear(torch.cat([hidden_states, graph_latent_vec], dim=-1)))
+        hidden_states = torch.relu(self.concat_squash_linear(torch.cat([hidden_states, tree_latent_vec, graph_latent_vec], dim=-1)))
         cell_memory_ph = torch.zeros_like(hidden_states)
 
         all_hidden_states = []
@@ -537,7 +537,7 @@ class UnifiedDecoder(nn.Module):
         '''tensor_batch_list should never be empty, as \'SECOND_STEM_INITIAL_COND_FAILED\' should never happen'''
         tensor_batch_list = torch.as_tensor(batch_list).to(self.device)
         last_token = last_token.index_select(0, tensor_batch_list)
-        hidden_state = torch.relu(self.concat_squash_linear(torch.cat([hidden_state, graph_latent_vec], dim=-1)))
+        hidden_state = torch.relu(self.concat_squash_linear(torch.cat([hidden_state, tree_latent_vec, graph_latent_vec], dim=-1)))
         cell_memory_ph = torch.zeros_like(hidden_state)
         hidden_state = hidden_state.index_select(0, tensor_batch_list)
         cell_memory_ph = cell_memory_ph.index_select(0, tensor_batch_list)
