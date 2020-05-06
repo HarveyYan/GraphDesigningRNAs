@@ -22,7 +22,10 @@ def assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool=None):
         all_parsed_trees = []
         for rna_seq, all_nodes, successful in zip(all_rna_seq, all_trees, is_successful):
             if successful is True:
-                all_parsed_trees.append(RNAJunctionTree(rna_seq, None, nodes=all_nodes))
+                if len(rna_seq) > 0:
+                    all_parsed_trees.append(RNAJunctionTree(rna_seq, None, nodes=all_nodes))
+                else:
+                    all_parsed_trees.append('EMPTY_RNA')
             else:
                 all_parsed_trees.append(successful)
     else:

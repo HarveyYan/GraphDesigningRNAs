@@ -134,8 +134,8 @@ class UnifiedDecoder(nn.Module):
             seq_input += [np.zeros(len(NUC_VOCAB), dtype=np.float32)] * (max_len - len(seq_input))
         all_seq_input = torch.as_tensor(np.array(all_seq_input)).to(self.device)
 
-        pre_padding_idx = (np.array(list(range(0, len(all_len) * max_len, max_len)))
-                           + np.array(all_len) - 1).astype(np.long)
+        # pre_padding_idx = (np.array(list(range(0, len(all_len) * max_len, max_len)))
+        #                    + np.array(all_len) - 1).astype(np.long)
         all_pre_padding_idx = np.concatenate(
             [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)]).astype(np.long)
 
@@ -160,7 +160,7 @@ class UnifiedDecoder(nn.Module):
             all_hidden_states = torch.stack(all_hidden_states, dim=1).view(-1, self.hidden_size)
 
         # the last hidden state at each segment
-        new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(self.device))
+        # new_h = all_hidden_states.index_select(0, torch.as_tensor(pre_padding_idx).to(self.device))
         all_hidden_states = all_hidden_states.index_select(0, torch.as_tensor(all_pre_padding_idx).to(self.device))
 
         segment_representation = []
@@ -177,7 +177,8 @@ class UnifiedDecoder(nn.Module):
             graph_latent_vec.index_select(0, tensor_batch_idx),
         ], dim=1)
 
-        return new_h, all_hidden_states, segment_representation
+        '''todo, experimenting new_h with aggregated hidden states'''
+        return segment_representation, all_hidden_states, segment_representation
 
     def forward(self, rna_tree_batch, tree_latent_vec, graph_latent_vec):
         '''
@@ -259,8 +260,9 @@ class UnifiedDecoder(nn.Module):
                     segment_local_field.append(torch.zeros(self.hidden_size, dtype=torch.float32).to(self.device))
                 else:
                     # history segment embeddings
-                    # todo, better than sum
-                    segment_local_field.append(sum(node_x.segment_features[1:nb_effective_msg]))
+                    # todo, experimenting max
+                    segment_local_field.append(
+                        torch.max(torch.stack(node_x.segment_features[1:nb_effective_msg], dim=0), dim=0)[0])
 
                 # teacher forcing the ground truth node label
                 onehot_enc = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
@@ -359,7 +361,7 @@ class UnifiedDecoder(nn.Module):
             if node_x.segment_features[-1] is None:
                 segment_local_field.append(torch.zeros(self.hidden_size, dtype=torch.float32).to(self.device))
             else:
-                segment_local_field.append(sum(node_x.segment_features[1:]))
+                segment_local_field.append(torch.max(torch.stack(node_x.segment_features[1:], dim=0), dim=0)[0])
 
             # decode the last segment of the non pseudo root node
             if node_x.hpn_label != 'H':
@@ -613,6 +615,9 @@ class UnifiedDecoder(nn.Module):
             cont_translation_idx = np.where(nuc_idx != len(NUC_VOCAB) - 1)[0]
             tensor_cont_translation_idx = torch.as_tensor(cont_translation_idx).to(self.device)
 
+            all_hidden_states.append(hidden_state)
+            all_batch_list.extend(batch_list)
+
             if len(cont_translation_idx) == 0:
                 break
 
@@ -622,9 +627,6 @@ class UnifiedDecoder(nn.Module):
             tree_latent_vec = tree_latent_vec.index_select(0, tensor_cont_translation_idx)
             graph_latent_vec = graph_latent_vec.index_select(0, tensor_cont_translation_idx)
             batch_list = batch_list[cont_translation_idx]
-
-            all_hidden_states.append(hidden_state)
-            all_batch_list.extend(batch_list)
 
             decode_step += 1
 
@@ -653,7 +655,8 @@ class UnifiedDecoder(nn.Module):
             else:
                 segment_representation[batch_idx] = torch.zeros(self.hidden_size).to(self.device)
 
-        return final_hidden_state, decoded_nuc_idx, final_last_token, successful, segment_representation
+        '''todo, experimenting new_h with aggregated hidden states'''
+        return segment_representation, decoded_nuc_idx, final_last_token, successful, segment_representation
 
     def decode_segment(self, list_current_node, last_token, hidden_state, tree_latent_vec, graph_latent_vec,
                        prob_decode, is_backtrack, enforce_dec_prior=True):
@@ -879,7 +882,7 @@ class UnifiedDecoder(nn.Module):
                 else:
                     # history segment embeddings
                     # todo, better than sum here, perhaps max? Also should change segment features
-                    segment_local_field.append(sum(node_x.segment_features[1:nb_effective_msg]))
+                    segment_local_field.append(torch.max(torch.stack(node_x.segment_features[1:nb_effective_msg], dim=0), dim=0)[0])
 
                 onehot_enc = np.array(list(map(lambda x: x == node_x.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
                 hpn_label.append(onehot_enc)

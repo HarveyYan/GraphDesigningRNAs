@@ -93,8 +93,10 @@ if __name__ == "__main__":
 
     for epoch in range(1, args.epoch + 1):
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
-                                    num_workers=4, tree_encoder_arch=args.tree_encoder_arch)
+                                    num_workers=8, tree_encoder_arch=args.tree_encoder_arch)
         for batch in loader:
+            if total_step == 10:
+                break
             total_step += 1
             model.zero_grad()
             ret_dict = model(batch)
@@ -158,8 +160,8 @@ if __name__ == "__main__":
         # validation step
         print('End of epoch %d,' % (epoch), 'starting validation')
         valid_batch_size = 128
-        loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', args.batch_size,
-                                    num_workers=4, tree_encoder_arch=args.tree_encoder_arch)
+        loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', valid_batch_size,
+                                    num_workers=8, tree_encoder_arch=args.tree_encoder_arch)
 
         # turns out there is a very large graph in the validation set, therefore we have to use a smaller batch size
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
@@ -188,7 +190,6 @@ if __name__ == "__main__":
                 tree_batch, graph_encoder_input, tree_encoder_input = batch
                 # tree_batch, graph_encoder_input, tree_encoder_input = next(loader)
                 graph_vectors, tree_vectors = model.encode(graph_encoder_input, tree_encoder_input)
-                # latent_vec = torch.cat([graph_vectors, tree_vectors], dim=-1)
 
                 if i < post_max_iters:
                     all_seq = [''.join(tree.rna_seq) for tree in tree_batch]
@@ -212,9 +213,9 @@ if __name__ == "__main__":
                     post_valid_noreg += np.sum(batch_post_valid)
                     post_fe_deviation_noreg += np.sum(batch_post_fe_deviation)
 
-                    # bar.set_description(
-                    #     'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
-                    #     % (recon_acc / total * 100, post_valid / total * 100, post_fe_deviation / post_valid))
+                #     bar.set_description(
+                #         'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
+                #         % (recon_acc / total * 100, post_valid / total * 100, post_fe_deviation / post_valid))
                 #
                 # bar.refresh()
 
@@ -233,12 +234,11 @@ if __name__ == "__main__":
                 valid_neg_log_prior += -float(log_pz.mean())
                 valid_kl += float(- entropy.mean() - log_pz.mean())
 
-                valid_node_acc, valid_nuc_stop_acc, valid_nuc_ord_acc, valid_nuc_acc, valid_topo_acc = \
-                    ret_dict['nb_hpn_pred_correct'] / ret_dict['nb_hpn_targets'], \
-                    ret_dict['nb_stop_trans_pred_correct'] / ret_dict['nb_stop_trans_targets'], \
-                    ret_dict['nb_ord_nuc_pred_correct'] / ret_dict['nb_ord_nuc_targets'], \
-                    ret_dict['nb_nuc_pred_correct'] / ret_dict['nb_nuc_targets'], \
-                    ret_dict['nb_stop_pred_correct'] / ret_dict['nb_stop_targets'],
+                valid_node_acc += ret_dict['nb_hpn_pred_correct'] / ret_dict['nb_hpn_targets']
+                valid_nuc_stop_acc += ret_dict['nb_stop_trans_pred_correct'] / ret_dict['nb_stop_trans_targets']
+                valid_nuc_ord_acc += ret_dict['nb_ord_nuc_pred_correct'] / ret_dict['nb_ord_nuc_targets']
+                valid_nuc_acc += ret_dict['nb_nuc_pred_correct'] / ret_dict['nb_nuc_targets']
+                valid_topo_acc += ret_dict['nb_stop_pred_correct'] / ret_dict['nb_stop_targets']
 
         lib.plot_utils.plot('Validation_Entropy', valid_entropy / nb_iters, index=1)
         lib.plot_utils.plot('Validation_Neg_Log_Prior', valid_neg_log_prior / nb_iters, index=1)

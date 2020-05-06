@@ -96,6 +96,8 @@ if __name__ == "__main__":
         if not os.path.exists(enc_epoch_dir):
             os.makedirs(enc_epoch_dir)
 
+        from importlib import reload
+        reload(lib.plot_utils)
         lib.plot_utils.set_output_dir(enc_epoch_dir)
         lib.plot_utils.suppress_stdout()
 
