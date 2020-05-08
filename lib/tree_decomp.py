@@ -89,20 +89,27 @@ class RNAJunctionTree:
         # - canonical base pairs
         # - G-U pairs are allowed
         # 3. valid number of branches in each hypernode element
+        if len(self.rna_seq) == 0:
+            self.error_code = 'EMPTY_RNA'
+            return False
         self.rna_struct = ['.'] * len(self.rna_seq)
         for node in self.nodes:
             if node.hpn_label == 'S':
                 nb_segments = len(node.nt_idx_assignment)
                 if nb_segments != 2:
-                    return False
-                if len(node.nt_idx_assignment[0]) != len(node.nt_idx_assignment[1]):
+                    self.error_code = 'STEM(id %d) doesn\'t have exactly two segments' % (node.idx)
                     return False
                 if len(node.nt_idx_assignment[0]) == 0 or len(node.nt_idx_assignment[1]) == 0:
+                    self.error_code = 'STEM(id %d) have empty segments' % (node.idx)
+                    return False
+                if len(node.nt_idx_assignment[0]) != len(node.nt_idx_assignment[1]):
+                    self.error_code = 'STEM(id %d) two segments are in varying length' % (node.idx)
                     return False
                 for nt_l_idx, nt_r_idx in zip(node.nt_idx_assignment[0], reversed(node.nt_idx_assignment[1])):
                     nt_l = NUC_VOCAB.index(self.rna_seq[nt_l_idx])
                     nt_r = NUC_VOCAB.index(self.rna_seq[nt_r_idx])
                     if allowed_basepairs[nt_l][nt_r] is False:
+                        self.error_code = 'STEM(id %d) have invalid basepairing' % (node.idx)
                         return False
                 for nt_idx in node.nt_idx_assignment[0]:
                     self.rna_struct[nt_idx] = '('
@@ -111,10 +118,31 @@ class RNAJunctionTree:
             elif node.hpn_label == 'I':
                 nb_segments = len(node.nt_idx_assignment)
                 if nb_segments != 2:
+                    self.error_code = 'INTERNAL_LOOP(id %d) doesn\'t have exactly two segments' % (node.idx)
                     return False
+                if node.idx > 1:
+                    min_len = min([len(nt_idx_segment) for nt_idx_segment in node.nt_idx_assignment])
+                    if min_len <= 1:
+                        self.error_code = 'INTERNAL_LOOP(id %d) have empty segments' % (node.idx)
+                        return False
             elif node.hpn_label == 'M':
                 nb_segments = len(node.nt_idx_assignment)
                 if nb_segments < 3:
+                    self.error_code = 'MULTI_LOOP(id %d) have less than 3 segments' % (node.idx)
+                    return False
+                if node.idx > 1:
+                    min_len = min([len(nt_idx_segment) for nt_idx_segment in node.nt_idx_assignment])
+                else:
+                    # if len(node.nt_idx_assignment[0]) == 0:
+                    #     self.error_code = 'Multi loop (id %d) dangling start is empty' % (node.idx)
+                    #     return False
+                    min_len = min([len(nt_idx_segment) for nt_idx_segment in node.nt_idx_assignment[1:-1]])
+                if min_len <= 1:
+                    self.error_code = 'MULTI_LOOP(id %d) have empty segments' % (node.idx)
+                    return False
+            elif node.hpn_label == 'H':
+                if node.idx > 1 and len(node.nt_idx_assignment) <= 4:
+                    self.error_code = 'HAIRPIN_LOOP(id %d) have less than 3 unpaired nucleotides' % (node.idx)
                     return False
         self.rna_struct = ''.join(self.rna_struct)
         return True
@@ -437,8 +465,6 @@ def dfs_nt_traversal_check(tree):
         return True
 
 
-
-
 if __name__ == "__main__":
     np.set_printoptions(threshold=np.inf, edgeitems=30, linewidth=100000, )
 
@@ -468,6 +494,7 @@ if __name__ == "__main__":
     node_labels[node_labels == 'I'] = "Internal loop"
     # print(node_labels)
     from lib.plot_utils import draw_graph
+
     #
     draw_graph(np.array(adjmat.todense()), node_labels=node_labels)
 

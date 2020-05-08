@@ -15,7 +15,8 @@ import lib.plot_utils, lib.logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--save_dir', required=True)
-parser.add_argument('--expr_path', type=str, default='/home/zichao/lstm_baseline_output/20200429-223941-flow-prior-limited-data-10-1e-4-1e-2')
+parser.add_argument('--expr_path', type=str, default=
+'/home/zichao/scratch/JTRNA/lstm_baseline_output/20200429-223941-flow-prior-limited-data-10-1e-4-1e-2')
 parser.add_argument('--hidden_size', type=int, default=256)
 parser.add_argument('--batch_size', type=int, default=32)
 
@@ -28,6 +29,7 @@ all_output_size = {
     'data_RBPsmed.h5': 21,
     'data_RBPshigh.h5': 11
 }
+
 
 def evaluate(loader):
     all_loss, nb_preds, all_preds, all_label = 0., 0., [], []
@@ -98,6 +100,7 @@ if __name__ == "__main__":
             os.makedirs(enc_epoch_dir)
 
         from importlib import reload
+
         reload(lib.plot_utils)
         lib.plot_utils.set_output_dir(enc_epoch_dir)
         lib.plot_utils.suppress_stdout()

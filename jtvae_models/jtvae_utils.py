@@ -10,7 +10,7 @@ def assemble_subroutine(args):
     if successful is True:
         tree = RNAJunctionTree(rna_seq, None, nodes=all_nodes)
         if tree.is_valid is False:
-            return 'INVALID'
+            return tree.error_code
         else:
             return tree
     else:
@@ -22,10 +22,11 @@ def assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool=None):
         all_parsed_trees = []
         for rna_seq, all_nodes, successful in zip(all_rna_seq, all_trees, is_successful):
             if successful is True:
-                if len(rna_seq) > 0:
-                    all_parsed_trees.append(RNAJunctionTree(rna_seq, None, nodes=all_nodes))
+                tree = RNAJunctionTree(rna_seq, None, nodes=all_nodes)
+                if tree.is_valid:
+                    all_parsed_trees.append(tree)
                 else:
-                    all_parsed_trees.append('EMPTY_RNA')
+                    all_parsed_trees.append(tree.error_code)
             else:
                 all_parsed_trees.append(successful)
     else:
@@ -76,9 +77,14 @@ def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, 
 
     all_parsed_trees = assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool)
 
-    ret = list(mp_pool.imap(posterior_check_subroutine,
-                            list(zip(original_sequence, original_structure,
-                                     all_parsed_trees))))
+    if mp_pool is None:
+        ret = []
+        for args in zip(original_sequence, original_structure, all_parsed_trees):
+            ret.append(posterior_check_subroutine(args))
+    else:
+        ret = list(mp_pool.imap(posterior_check_subroutine,
+                                list(zip(original_sequence, original_structure,
+                                         all_parsed_trees))))
 
     for i, r in enumerate(ret):
         recon_acc[batch_idx[i]] += r[0]
@@ -111,8 +117,13 @@ def evaluate_prior(g_z_vec, t_z_vec, nb_samples, nb_decode, mp_pool, enforce_rna
 
     all_parsed_trees = assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool)
 
-    ret = np.array(list(mp_pool.imap(prior_check_subroutine,
-                                     all_parsed_trees)))
+    if mp_pool is None:
+        ret = []
+        for tree in all_parsed_trees:
+            ret.append(prior_check_subroutine(tree))
+    else:
+        ret = np.array(list(mp_pool.imap(prior_check_subroutine,
+                                         all_parsed_trees)))
 
     for i, r in enumerate(ret):
         prior_valid[batch_idx[i]] += r[0]

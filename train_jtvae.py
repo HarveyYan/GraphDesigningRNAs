@@ -238,82 +238,82 @@ if __name__ == "__main__":
                 valid_nuc_acc += ret_dict['nb_nuc_pred_correct'] / ret_dict['nb_nuc_targets']
                 valid_topo_acc += ret_dict['nb_stop_pred_correct'] / ret_dict['nb_stop_targets']
 
-        lib.plot_utils.plot('Validation_Entropy', valid_entropy / nb_iters, index=1)
-        lib.plot_utils.plot('Validation_Neg_Log_Prior', valid_neg_log_prior / nb_iters, index=1)
-        lib.plot_utils.plot('Validation_KL', valid_kl / nb_iters, index=1)
-        lib.plot_utils.plot('Validation_Node_Acc', valid_node_acc / nb_iters * 100, index=1)
-        lib.plot_utils.plot('Validation_Nuc_Stop_Acc', valid_nuc_stop_acc / nb_iters * 100, index=1)
-        lib.plot_utils.plot('Validation_Nuc_Ord_Acc', valid_nuc_ord_acc / nb_iters * 100, index=1)
-        lib.plot_utils.plot('Validation_Nuc_Acc', valid_nuc_acc / nb_iters * 100, index=1)
-        lib.plot_utils.plot('Validation_Topo_Acc', valid_topo_acc / nb_iters * 100, index=1)
+            lib.plot_utils.plot('Validation_Entropy', valid_entropy / nb_iters, index=1)
+            lib.plot_utils.plot('Validation_Neg_Log_Prior', valid_neg_log_prior / nb_iters, index=1)
+            lib.plot_utils.plot('Validation_KL', valid_kl / nb_iters, index=1)
+            lib.plot_utils.plot('Validation_Node_Acc', valid_node_acc / nb_iters * 100, index=1)
+            lib.plot_utils.plot('Validation_Nuc_Stop_Acc', valid_nuc_stop_acc / nb_iters * 100, index=1)
+            lib.plot_utils.plot('Validation_Nuc_Ord_Acc', valid_nuc_ord_acc / nb_iters * 100, index=1)
+            lib.plot_utils.plot('Validation_Nuc_Acc', valid_nuc_acc / nb_iters * 100, index=1)
+            lib.plot_utils.plot('Validation_Topo_Acc', valid_topo_acc / nb_iters * 100, index=1)
 
-        # posterior decoding with enforced RNA regularity
-        lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100, index=1)
-        lib.plot_utils.plot('Validation_post_valid_with_reg', post_valid / total * 100, index=1)
-        lib.plot_utils.plot('Validation_post_fe_deviation_with_reg', post_fe_deviation / post_valid, index=1)
+            # posterior decoding with enforced RNA regularity
+            lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_valid_with_reg', post_valid / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_with_reg', post_fe_deviation / post_valid, index=1)
 
-        # posterior decoding without RNA regularity
-        lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
-        lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
-        lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid, index=1)
+            # posterior decoding without RNA regularity
+            lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid, index=1)
 
-        ######################## sampling from the prior ########################
-        sampled_g_z = torch.as_tensor(np.random.randn(1000, args.latent_size).
-                                      astype(np.float32)).to(device)
-        sampled_t_z = torch.as_tensor(np.random.randn(1000, args.latent_size).
-                                      astype(np.float32)).to(device)
-        sampled_z = torch.cat([sampled_g_z, sampled_t_z], dim=-1)
-        if args.use_flow_prior:
-            sampled_z = model.latent_cnf(sampled_z, None, reverse=True).view(
-                *sampled_z.size())
-        sampled_g_z = sampled_z[:, :args.latent_size]
-        sampled_t_z = sampled_z[:, args.latent_size:]
+            ######################## sampling from the prior ########################
+            sampled_g_z = torch.as_tensor(np.random.randn(1000, args.latent_size).
+                                          astype(np.float32)).to(device)
+            sampled_t_z = torch.as_tensor(np.random.randn(1000, args.latent_size).
+                                          astype(np.float32)).to(device)
+            sampled_z = torch.cat([sampled_g_z, sampled_t_z], dim=-1)
+            if args.use_flow_prior:
+                sampled_z = model.latent_cnf(sampled_z, None, reverse=True).view(
+                    *sampled_z.size())
+            sampled_g_z = sampled_z[:, :args.latent_size]
+            sampled_t_z = sampled_z[:, args.latent_size:]
 
-        ######################## evaluate prior with regularity constraints ########################
-        prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
-                                                            enforce_rna_prior=True)
-        lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
-        lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            ######################## evaluate prior with regularity constraints ########################
+            prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
+                                                                enforce_rna_prior=True)
+            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
-        ######################## evaluate prior without regularity constraints ########################
-        prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
-                                                            enforce_rna_prior=False)
-        lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
-        lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            ######################## evaluate prior without regularity constraints ########################
+            prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
+                                                                enforce_rna_prior=False)
+            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
-        ######################## evaluate prior without regularity constraints and greedy ########################
-        prior_valid, prior_fe_deviation, parsed_trees = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
-                                                                       enforce_rna_prior=False, prob_decode=False)
-        decoded_seq = [''.join(tree.rna_seq) for tree in parsed_trees[:1000] if
-                       type(tree) is RNAJunctionTree and tree.is_valid]
-        lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
-        lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
-                            index=1)
-        lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / 10, index=1)
+            ######################## evaluate prior without regularity constraints and greedy ########################
+            prior_valid, prior_fe_deviation, parsed_trees = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
+                                                                           enforce_rna_prior=False, prob_decode=False)
+            decoded_seq = [''.join(tree.rna_seq) for tree in parsed_trees[:1000] if
+                           type(tree) is RNAJunctionTree and tree.is_valid]
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
+                                index=1)
+            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / 10, index=1)
 
-        ######################## mutual information ########################
-        cur_mi = total_mi / nb_iters
-        lib.plot_utils.plot('Validation_mutual_information', cur_mi, index=1)
+            ######################## mutual information ########################
+            cur_mi = total_mi / nb_iters
+            lib.plot_utils.plot('Validation_mutual_information', cur_mi, index=1)
 
-        ######################## active units ########################
-        all_means = np.concatenate(all_means, axis=0)
-        au_mean = np.mean(all_means, axis=0, keepdims=True)
-        au_var = all_means - au_mean
-        ns = au_var.shape[0]
-        au_var = (au_var ** 2).sum(axis=0) / (ns - 1)
-        delta = 0.01
-        au = (au_var >= delta).sum().item()
-        lib.plot_utils.plot('Validation_active_units', au, index=1)
+            ######################## active units ########################
+            all_means = np.concatenate(all_means, axis=0)
+            au_mean = np.mean(all_means, axis=0, keepdims=True)
+            au_var = all_means - au_mean
+            ns = au_var.shape[0]
+            au_var = (au_var ** 2).sum(axis=0) / (ns - 1)
+            delta = 0.01
+            au = (au_var >= delta).sum().item()
+            lib.plot_utils.plot('Validation_active_units', au, index=1)
 
-        tocsv = {'Epoch': epoch}
-        for name, val in lib.plot_utils._since_last_flush.items():
-            if lib.plot_utils._ticker_registry[name] == 1:
-                tocsv[name] = list(val.values())[0]
-        logger.update_with_dict(tocsv)
+            tocsv = {'Epoch': epoch}
+            for name, val in lib.plot_utils._since_last_flush.items():
+                if lib.plot_utils._ticker_registry[name] == 1:
+                    tocsv[name] = list(val.values())[0]
+            logger.update_with_dict(tocsv)
 
-        lib.plot_utils.set_xlabel_for_tick(index=1, label='epoch')
-        lib.plot_utils.flush()
-        lib.plot_utils.tick(index=1)
+            lib.plot_utils.set_xlabel_for_tick(index=1, label='epoch')
+            lib.plot_utils.flush()
+            lib.plot_utils.tick(index=1)
 
     if mp_pool is not None:
         mp_pool.close()
