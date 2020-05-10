@@ -3,7 +3,6 @@ import forgi.graph.bulge_graph as fgb
 import RNA
 import numpy as np
 import torch
-import gc
 
 NUC_VOCAB = ['A', 'C', 'G', 'U']
 allowed_basepairs = [[False, False, False, True],
@@ -14,30 +13,34 @@ allowed_basepairs = [[False, False, False, True],
 model = None
 
 
-def isvalid(args, check_basepairing=False):
+def isvalid(args, check_basepairing=True):
     if check_basepairing:
         rna_seq, dotbracket_struct = args
     else:
         dotbracket_struct = args
 
-    # check that hairpin has at least 3 nucleotides
-    for match in re.finditer(r'\([.]*\)', dotbracket_struct):
-        if match.end() - match.start() < 5:
-            return False
     try:
         bg = fgb.BulgeGraph.from_dotbracket(dotbracket_struct)
     except ValueError:
         return False
 
-    if check_basepairing:
+    if check_basepairing is True:
         for i, st_ele in enumerate(dotbracket_struct):
             # base-pairing
             if st_ele == '(':
                 to = bg.pairing_partner(i + 1) - 1
+                if to - i <= 3:
+                    return False  # Hairpin is too short
                 nuc_from_idx = NUC_VOCAB.index(rna_seq[i])
                 nuc_to_idx = NUC_VOCAB.index(rna_seq[to])
                 if allowed_basepairs[nuc_from_idx][nuc_to_idx] is False:
+                    # print('basepair mark')
                     return False
+    else:
+        # check that hairpin has at least 3 nucleotides
+        for match in re.finditer(r'\([.]*\)', dotbracket_struct):
+            if match.end() - match.start() < 5:
+                return False
 
     return True
 
@@ -45,7 +48,7 @@ def isvalid(args, check_basepairing=False):
 def posterior_check_subroutine(args):
     o_seq, o_struct, d_seq, d_struct = args
     ret = [0, 0, 0]  # recon_acc, post_valid, post_fe_dev
-    if isvalid(d_struct):
+    if isvalid((d_seq, d_struct)):
         ret[1] = 1
         if d_seq == o_seq and d_struct == o_struct:
             ret[0] = 1
@@ -57,7 +60,7 @@ def posterior_check_subroutine(args):
 
 
 def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_pool, nb_encode=10, nb_decode=10,
-                       enforce_rna_prior=True):
+                       prob_decode=True, enforce_rna_prior=True):
     batch_size = len(original_sequence)
     recon_acc = [0] * batch_size
     posterior_valid = [0] * batch_size
@@ -77,12 +80,18 @@ def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_
     batch_idx = batch_idx * nb_decode
     to_decode_latent = torch.cat([sampled_latent] * nb_decode, dim=0)
 
-    decoded_seq, decoded_struct = model.decoder.decode(to_decode_latent, prob_decode=True,
+    decoded_seq, decoded_struct = model.decoder.decode(to_decode_latent, prob_decode=prob_decode,
                                                        enforce_rna_prior=enforce_rna_prior)
 
-    ret = list(mp_pool.imap(posterior_check_subroutine,
-                            list(zip(original_sequence, original_structure,
-                                     decoded_seq, decoded_struct))))
+    if mp_pool is None:
+        ret = []
+        for args in zip(original_sequence, original_structure,
+                        decoded_seq, decoded_struct):
+            ret.append(posterior_check_subroutine(args))
+    else:
+        ret = list(mp_pool.imap(posterior_check_subroutine,
+                                list(zip(original_sequence, original_structure,
+                                         decoded_seq, decoded_struct))))
 
     for i, r in enumerate(ret):
         recon_acc[batch_idx[i]] += r[0]
@@ -95,7 +104,7 @@ def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_
 def prior_check_subroutine(args):
     d_seq, d_struct = args
     ret = [0, 0]  # prior_valid, prior_fe_dev
-    if isvalid(d_struct):
+    if isvalid(args):
         ret[0] = 1
         mfe_struct, mfe = RNA.fold(d_seq)
         decoded_free_energy = RNA.eval_structure_simple(d_seq, d_struct)
@@ -114,8 +123,13 @@ def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforc
     decoded_seq, decoded_struct = model.decoder.decode(to_decode_latent, prob_decode=prob_decode,
                                                        enforce_rna_prior=enforce_rna_prior)
 
-    ret = np.array(list(mp_pool.imap(prior_check_subroutine,
-                                     list(zip(decoded_seq, decoded_struct)))))
+    if mp_pool is None:
+        ret = []
+        for args in zip(decoded_seq, decoded_struct):
+            ret.append(prior_check_subroutine(args))
+    else:
+        ret = np.array(list(mp_pool.imap(prior_check_subroutine,
+                                         list(zip(decoded_seq, decoded_struct)))))
 
     for i, r in enumerate(ret):
         prior_valid[batch_idx[i]] += r[0]

@@ -37,6 +37,7 @@ parser.add_argument('--tree_encoder_arch', type=str, default='baseline')
 parser.add_argument('--warmup_epoch', type=int, default=1)
 parser.add_argument('--use_flow_prior', type=eval, default=True, choices=[True, False])
 parser.add_argument('--limit_data', type=int, default=None)
+parser.add_argument('--resume', type=eval, default=False, choices=[True, False])
 
 if __name__ == "__main__":
 
@@ -90,6 +91,17 @@ if __name__ == "__main__":
 
     mp_pool = Pool(8)
     jtvae_models.jtvae_utils.model = model
+
+    if args.resume:
+        '''load warm-up results'''
+        weight_path = '/home/zichao/scratch/JTRNA/output/20200507-182856-512-64-5-10-maxpooled-hidden-states/model.epoch-1'
+        all_weights = torch.load(weight_path)
+        model.load_state_dict(all_weights['model_weights'])
+        optimizer.load_state_dict(all_weights['opt_weights'])
+        print('Weights loaded from', weight_path)
+        epoch_to_start = 2
+    else:
+        epoch_to_start = 1
 
     for epoch in range(1, args.epoch + 1):
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
@@ -255,7 +267,7 @@ if __name__ == "__main__":
             # posterior decoding without RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
-            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg, index=1)
 
             ######################## sampling from the prior ########################
             sampled_g_z = torch.as_tensor(np.random.randn(1000, args.latent_size).

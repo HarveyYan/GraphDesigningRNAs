@@ -83,6 +83,7 @@ if __name__ == "__main__":
 
     cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     save_dir = '/'.join(args.save_dir.split('/')[:-1] + [cur_time + '-' + args.save_dir.split('/')[-1]])
+    save_dir += '-[%s]' % (args.expr_path.split('/')[-1])
 
     all_test_loss, all_test_roc, all_test_ap = [], [], []
 

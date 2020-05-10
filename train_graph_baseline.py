@@ -38,7 +38,7 @@ parser.add_argument('--limit_data', type=int, default=None)
 
 if __name__ == "__main__":
 
-    device = torch.device('cuda:4' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
     print(args)
@@ -79,6 +79,7 @@ if __name__ == "__main__":
                                    'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg', 'Validation_post_fe_deviation_with_reg',
                                    'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg', 'Validation_post_fe_deviation_no_reg',
                                    'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg', 'Prior_fe_deviation_no_reg',
+                                   'Prior_valid_no_reg_greedy', 'Prior_fe_deviation_no_reg_greedy', 'Prior_uniqueness_no_reg_greedy',
                                    'Validation_mutual_information', 'Validation_NLL_IW_100', 'Validation_active_units'])
 
     mp_pool = Pool(8)
@@ -238,23 +239,35 @@ if __name__ == "__main__":
             # posterior decoding without RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
-            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg, index=1)
 
+            ######################## sampling from the prior ########################
             sampled_latent_prior = torch.as_tensor(np.random.randn(1000, args.latent_size).astype(np.float32)).to(
                 device)
             if args.use_flow_prior:
                 sampled_latent_prior = model.latent_cnf(sampled_latent_prior, None, reverse=True).view(
                     *sampled_latent_prior.size())
 
+            ######################## evaluate prior with regularity constraints ########################
             prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=True)
             lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
+            ######################## evaluate prior without regularity constraints ########################
             prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                              enforce_rna_prior=False)
             lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+
+            ######################## evaluate prior without regularity constraints and greedy ########################
+            prior_valid, prior_fe_deviation, decoded_seq, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
+                                                                             enforce_rna_prior=False, prob_decode=False)
+            decoded_seq = decoded_seq[:1000]
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
+                                index=1)
+            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / 10, index=1)
 
             cur_mi = total_mi / nb_iters
             lib.plot_utils.plot('Validation_mutual_information', cur_mi, index=1)
