@@ -20,7 +20,13 @@ class JunctionTreeFolder:
     # data loading entry
     def __init__(self, data_folder, batch_size, num_workers=4, shuffle=True, **kwargs):
         self.data_folder = data_folder
-        self.data_files = [fn for fn in os.listdir(data_folder)]
+        self.limit_data = kwargs.get('limit_data', None)
+        if self.limit_data:
+            assert type(self.limit_data) is int, '\'limit_data\' should either be None or an integer'
+            self.data_files = [fn for fn in os.listdir(data_folder) if
+                               int(fn.split('-')[-1].split('.')[0]) <= self.limit_data]
+        else:
+            self.data_files = [fn for fn in os.listdir(data_folder)]
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle

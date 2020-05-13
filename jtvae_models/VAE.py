@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import copy
 
 from jtvae_models.GraphEncoder import GraphEncoder
 from jtvae_models.TreeEncoder import TreeEncoder
@@ -208,7 +209,10 @@ class JunctionTreeVAE(nn.Module):
             # [batch, ns], log p(x,z)
             graph_z_vec_reshaped = graph_z_vec.reshape(batch_size * ns, self.latent_dim)
             tree_z_vec_reshaped = tree_z_vec.reshape(batch_size * ns, self.latent_dim)
-            rep_tree_batch = [i for rna in tree_batch for i in [rna] * ns]
+            rep_tree_batch = []
+            for rna in tree_batch:
+                for _ in range(ns):
+                    rep_tree_batch.append(copy.deepcopy(rna))
             ret_dict = self.decoder(rep_tree_batch, tree_z_vec_reshaped, graph_z_vec_reshaped)
             recon_log_prob = - ret_dict['batch_nuc_pred_loss'].reshape(batch_size, ns) - \
                              ret_dict['batch_hpn_pred_loss'].reshape(batch_size, ns) - \

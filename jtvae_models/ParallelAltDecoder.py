@@ -424,7 +424,7 @@ class UnifiedDecoder(nn.Module):
 
         hpn_ret_dict = {
             'sum_hpn_pred_loss': torch.sum(hpn_pred_loss),
-            'batch_hpn_pred_loss': torch.as_tensor(batch_hpn_loss),
+            'batch_hpn_pred_loss': torch.as_tensor(batch_hpn_loss).to(self.device),
             'nb_hpn_targets': nb_hpn_targets,
             'nb_hpn_pred_correct': nb_hpn_pred_correct
         }
@@ -453,7 +453,7 @@ class UnifiedDecoder(nn.Module):
 
         nuc_ret_dict = {
             'sum_nuc_pred_loss': torch.sum(nuc_pred_loss),
-            'batch_nuc_pred_loss': torch.as_tensor(batch_nuc_loss),
+            'batch_nuc_pred_loss': torch.as_tensor(batch_nuc_loss).to(self.device),
             'nb_nuc_targets': nb_nuc_targets,
             'nb_nuc_pred_correct': nb_nuc_pred_correct,
             'nb_stop_trans_pred_correct': nb_stop_trans_pred_correct,

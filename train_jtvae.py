@@ -58,7 +58,7 @@ if __name__ == "__main__":
 
     print("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, amsgrad=True)
     # scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
 
     param_norm = lambda m: math.sqrt(sum([p.norm().item() ** 2 for p in m.parameters()]))
@@ -103,9 +103,10 @@ if __name__ == "__main__":
     else:
         epoch_to_start = 1
 
-    for epoch in range(1, args.epoch + 1):
+    for epoch in range(epoch_to_start, args.epoch + 1):
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
-                                    num_workers=8, tree_encoder_arch=args.tree_encoder_arch)
+                                    num_workers=8, tree_encoder_arch=args.tree_encoder_arch,
+                                    limit_data=args.limit_data)
         for batch in loader:
             total_step += 1
             model.zero_grad()
@@ -301,7 +302,8 @@ if __name__ == "__main__":
             lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
                                 index=1)
-            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / 10, index=1)
+
+            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(list(np.array(decoded_seq)[np.where(np.array(prior_valid) > 0)[0]]))) / np.sum(prior_valid) * 100, index=1)
 
             ######################## mutual information ########################
             cur_mi = total_mi / nb_iters
