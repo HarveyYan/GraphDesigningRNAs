@@ -8,10 +8,15 @@ import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
+import shutil
+import inspect
 from multiprocessing import Pool
 
 from jtvae_models.VAE import JunctionTreeVAE
 from lib.data_utils import JunctionTreeFolder
+import jtvae_models.GraphEncoder
+import jtvae_models.TreeEncoder
+import jtvae_models.ParallelAltDecoder
 import lib.plot_utils, lib.logger
 import jtvae_models.jtvae_utils
 from jtvae_models.jtvae_utils import *
@@ -74,11 +79,22 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
+    backup_dir = os.path.join(save_dir, 'backup')
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+    shutil.copy(__file__, backup_dir)
+    shutil.copy(inspect.getfile(JunctionTreeVAE), backup_dir)
+    shutil.copy(inspect.getfile(JunctionTreeFolder), backup_dir)
+    shutil.copy(inspect.getfile(jtvae_models.jtvae_utils), backup_dir)
+    shutil.copy(inspect.getfile(jtvae_models.GraphEncoder), backup_dir)
+    shutil.copy(inspect.getfile(jtvae_models.TreeEncoder), backup_dir)
+    shutil.copy(inspect.getfile(jtvae_models.ParallelAltDecoder), backup_dir)
+
     lib.plot_utils.set_output_dir(save_dir)
     lib.plot_utils.suppress_stdout()
     logger = lib.logger.CSVLogger(
         'run.csv', save_dir,
-        ['Epoch', 'Validation_Entropy', 'Validation_Neg_Log_Prior', 'Validation_KL',
+        ['Epoch', 'Beta', 'Validation_Entropy', 'Validation_Neg_Log_Prior', 'Validation_KL',
          'Validation_Node_Acc', 'Validation_Nuc_Stop_Acc', 'Validation_Nuc_Ord_Acc',
          'Validation_Nuc_Acc', 'Validation_Topo_Acc', 'Validation_recon_acc_with_reg',
          'Validation_post_valid_with_reg', 'Validation_post_fe_deviation_with_reg',
@@ -302,8 +318,11 @@ if __name__ == "__main__":
             lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
                                 index=1)
-
-            lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(list(np.array(decoded_seq)[np.where(np.array(prior_valid) > 0)[0]]))) / np.sum(prior_valid) * 100, index=1)
+            if len(decoded_seq) == 0:
+                lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', 0.,
+                                    index=1)
+            else:
+                lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / len(decoded_seq) * 100, index=1)
 
             ######################## mutual information ########################
             cur_mi = total_mi / nb_iters
@@ -318,6 +337,8 @@ if __name__ == "__main__":
             delta = 0.01
             au = (au_var >= delta).sum().item()
             lib.plot_utils.plot('Validation_active_units', au, index=1)
+
+            lib.plot_utils.plot('Beta', beta, index=1)
 
             tocsv = {'Epoch': epoch}
             for name, val in lib.plot_utils._since_last_flush.items():
