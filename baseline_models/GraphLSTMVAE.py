@@ -438,7 +438,7 @@ class LSTMDecoder(nn.Module):
                             for j in range(LEN_NUC_VOCAB):
                                 mask[i][j * LEN_STRUCT_VOCAB + 1] = -np.inf
                         else:
-                            for disallowed_nuc_idx in np.where(allowed_basepairs[last_nonclosed_nuc_item] is False):
+                            for disallowed_nuc_idx in np.where(allowed_basepairs[last_nonclosed_nuc_item] == False)[0]:  # blunder corrected
                                 mask[i][disallowed_nuc_idx * LEN_STRUCT_VOCAB + 1] = -np.inf
                                 # intuition: if you have to choose right bracket, don't select those nucleotides that
                                 # can't be paired with the last non-closed nucleotide

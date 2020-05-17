@@ -301,13 +301,13 @@ if __name__ == "__main__":
             ######################## evaluate prior with regularity constraints ########################
             prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
                                                                 enforce_rna_prior=True)
-            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
             ######################## evaluate prior without regularity constraints ########################
             prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
                                                                 enforce_rna_prior=False)
-            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
             lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
             ######################## evaluate prior without regularity constraints and greedy ########################
@@ -315,7 +315,7 @@ if __name__ == "__main__":
                                                                            enforce_rna_prior=False, prob_decode=False)
             decoded_seq = [''.join(tree.rna_seq) for tree in parsed_trees[:1000] if
                            type(tree) is RNAJunctionTree and tree.is_valid]
-            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
             lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
                                 index=1)
             if len(decoded_seq) == 0:

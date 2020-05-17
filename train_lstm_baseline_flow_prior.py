@@ -272,21 +272,21 @@ if __name__ == "__main__":
             ######################## evaluate prior with regularity constraints ########################
             prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                                    enforce_rna_prior=True)
-            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100 = /100
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid),
                                 index=1)
 
             ######################## evaluate prior without regularity constraints ########################
             prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
                                                                    enforce_rna_prior=False)
-            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100 = /100
             lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
 
             ######################## evaluate prior without regularity constraints and greedy ########################
             prior_valid, prior_fe_deviation, decoded_seq, _ = evaluate_prior(sampled_latent_prior, 1000, 1, mp_pool,
                                                                              enforce_rna_prior=False, prob_decode=False)
             decoded_seq = decoded_seq[:1000]
-            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /10000 * 100
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
             lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
                                 index=1)
             lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy',

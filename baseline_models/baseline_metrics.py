@@ -60,7 +60,7 @@ def posterior_check_subroutine(args):
 
 
 def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_pool, nb_encode=10, nb_decode=10,
-                       prob_decode=True, enforce_rna_prior=True):
+                       prob_decode=True, enforce_rna_prior=True, ret_decoded=False):
     batch_size = len(original_sequence)
     recon_acc = [0] * batch_size
     posterior_valid = [0] * batch_size
@@ -98,7 +98,10 @@ def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_
         posterior_valid[batch_idx[i]] += r[1]
         posterior_fe_deviation[batch_idx[i]] += r[2]
 
-    return recon_acc, posterior_valid, posterior_fe_deviation
+    if ret_decoded:
+        return recon_acc, posterior_valid, posterior_fe_deviation, ret, decoded_seq, decoded_struct
+    else:
+        return recon_acc, posterior_valid, posterior_fe_deviation
 
 
 def prior_check_subroutine(args):
@@ -112,7 +115,7 @@ def prior_check_subroutine(args):
     return ret
 
 
-def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforce_rna_prior=True, prob_decode=True):
+def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforce_rna_prior=True, prob_decode=True, ret_decoded=False):
     prior_valid = [0] * nb_samples
     prior_fe_deviation = [0] * nb_samples
     batch_idx = list(range(nb_samples))
@@ -135,4 +138,7 @@ def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforc
         prior_valid[batch_idx[i]] += r[0]
         prior_fe_deviation[batch_idx[i]] += r[1]
 
-    return prior_valid, prior_fe_deviation, decoded_seq, decoded_struct
+    if ret_decoded:
+        return prior_valid, prior_fe_deviation, ret, decoded_seq, decoded_struct
+    else:
+        return prior_valid, prior_fe_deviation, decoded_seq, decoded_struct

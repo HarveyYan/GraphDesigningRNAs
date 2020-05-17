@@ -49,7 +49,7 @@ def posterior_check_subroutine(args):
 
 
 def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, tree_latent_vec, mp_pool,
-                       nb_encode=10, nb_decode=10, enforce_rna_prior=True):
+                       nb_encode=10, nb_decode=10, enforce_rna_prior=True, prob_decode=True, ret_decoded=False):
     batch_size = len(original_sequence)
     recon_acc = [0] * batch_size
     posterior_valid = [0] * batch_size
@@ -72,7 +72,7 @@ def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, 
     t_z_vec = torch.cat([t_z_vec] * nb_decode, dim=0)
 
     all_rna_seq, all_trees, is_successful = model.decoder.decode(
-        t_z_vec, g_z_vec, prob_decode=True, enforce_topo_prior=enforce_rna_prior,
+        t_z_vec, g_z_vec, prob_decode=prob_decode, enforce_topo_prior=enforce_rna_prior,
         enforce_hpn_prior=enforce_rna_prior, enforce_dec_prior=enforce_rna_prior)
 
     all_parsed_trees = assemble_trees(all_rna_seq, all_trees, is_successful, mp_pool)
@@ -91,7 +91,10 @@ def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, 
         posterior_valid[batch_idx[i]] += r[1]
         posterior_fe_deviation[batch_idx[i]] += r[2]
 
-    return recon_acc, posterior_valid, posterior_fe_deviation
+    if ret_decoded:
+        return recon_acc, posterior_valid, posterior_fe_deviation, all_parsed_trees
+    else:
+        return recon_acc, posterior_valid, posterior_fe_deviation
 
 
 def prior_check_subroutine(d_tree):
