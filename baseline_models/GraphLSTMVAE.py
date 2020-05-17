@@ -30,10 +30,10 @@ MAX_DECODE_LENGTH = 1000
 MIN_HAIRPIN_LEN = 3
 MAX_FE = 0.85
 
-allowed_basepairs = [[False, False, False, True],
-                     [False, False, True, False],
-                     [False, True, False, True],
-                     [True, False, True, False]]
+allowed_basepairs = np.array([[False, False, False, True],
+                              [False, False, True, False],
+                              [False, True, False, True],
+                              [True, False, True, False]])
 
 NUC_FDIM = 4
 BOND_FDIM = 4
@@ -438,7 +438,8 @@ class LSTMDecoder(nn.Module):
                             for j in range(LEN_NUC_VOCAB):
                                 mask[i][j * LEN_STRUCT_VOCAB + 1] = -np.inf
                         else:
-                            for disallowed_nuc_idx in np.where(allowed_basepairs[last_nonclosed_nuc_item] == False)[0]:  # blunder corrected
+                            for disallowed_nuc_idx in np.where(allowed_basepairs[last_nonclosed_nuc_item] == False)[
+                                0]:  # blunder corrected
                                 mask[i][disallowed_nuc_idx * LEN_STRUCT_VOCAB + 1] = -np.inf
                                 # intuition: if you have to choose right bracket, don't select those nucleotides that
                                 # can't be paired with the last non-closed nucleotide

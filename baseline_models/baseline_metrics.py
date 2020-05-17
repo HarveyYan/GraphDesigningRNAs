@@ -34,7 +34,6 @@ def isvalid(args, check_basepairing=True):
                 nuc_from_idx = NUC_VOCAB.index(rna_seq[i])
                 nuc_to_idx = NUC_VOCAB.index(rna_seq[to])
                 if allowed_basepairs[nuc_from_idx][nuc_to_idx] is False:
-                    # print('basepair mark')
                     return False
     else:
         # check that hairpin has at least 3 nucleotides

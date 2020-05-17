@@ -32,12 +32,12 @@ parser.add_argument('--mode', required=True)
 def write_baseline_seq_struct(filename_stub, batch_idx, is_valid, decoded_seq, decoded_struct):
     with open(filename_stub.format('seq'), 'a') as file:
         for idx, is_valid_ in enumerate(is_valid):
-            if is_valid_ is True:
+            if is_valid_ == True:
                 file.write('>batch-%d-idx-%d\n%s\n' % (batch_idx, idx, decoded_seq[idx]))
 
     with open(filename_stub.format('struct'), 'a') as file:
         for idx, is_valid_ in enumerate(is_valid):
-            if is_valid_ is True:
+            if is_valid_ == True:
                 file.write('>batch-%d-idx-%d\n%s\n' % (batch_idx, idx, decoded_struct[idx]))
 
 
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     expr_dir = args.expr_dir
     cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     save_dir = os.sep.join(
-        args.save_dir.split(os.sep)[:-1] + [cur_time + '-rigorosity-[' + args.save_dir.split('/')[-1] + ']'])
+        expr_dir.split(os.sep)[:-1] + [cur_time + '-rigorosity-[' + expr_dir.split('/')[-1] + ']'])
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -94,17 +94,20 @@ if __name__ == "__main__":
     epochs_to_load = list(np.sort(epochs_to_load))
     print(epochs_to_load)
 
-    lib.plot_utils.set_first_tick(epochs_to_load[0])
+    lib.plot_utils.set_first_tick(int(epochs_to_load[0]))
     mp_pool = Pool(8)
 
     for enc_epoch_to_load in epochs_to_load:
         if mode == 'lstm':
             model = LSTMVAE(512, 128, 2, device=device, use_attention=True).to(device)
         elif mode == 'graph_lstm':
-            model = GraphLSTMVAE(512, 128, 5, use_aux_regressor=False, use_flow_prior=args.use_flow_prior)
+            model = GraphLSTMVAE(
+                512, 128, 5, use_aux_regressor=False,
+                use_flow_prior=args.use_flow_prior, device=device).to(device)
         else:
-            model = JunctionTreeVAE(512, 64, 5, 10, decode_nuc_with_lstm=True, use_flow_prior=args.use_flow_prior,
-                                    tree_encoder_arch='baseline')
+            model = JunctionTreeVAE(
+                512, 64, 5, 10, decode_nuc_with_lstm=True, use_flow_prior=args.use_flow_prior,
+                tree_encoder_arch='baseline', device=device).to(device)
 
         weight_path = os.path.join(expr_dir, 'model.epoch-%d' % (enc_epoch_to_load))
         print('Loading', weight_path)
@@ -118,11 +121,14 @@ if __name__ == "__main__":
 
         valid_batch_size = 256
         if mode == 'lstm':
-            loader = BasicLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4, shuffle=False)
+            loader = BasicLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+                                        shuffle=False)
         elif mode == 'graph_lstm':
-            loader = BasicGraphLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4, shuffle=False)
+            loader = BasicGraphLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+                                             shuffle=False)
         else:
-            loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4, shuffle=False)
+            loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+                                        shuffle=False)
 
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
         total = 0
@@ -164,7 +170,6 @@ if __name__ == "__main__":
                                                     list(np.array(original_data)[:, 1]),
                                                     latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
                                                     enforce_rna_prior=True, ret_decoded=True)
-
                     write_baseline_seq_struct(
                         os.path.join(epoch_dir, 'valid-post-sto-reg-{}.fa')
                         , i, np.array(ret)[:, 1], decoded_seq, decoded_struct)
@@ -275,8 +280,8 @@ if __name__ == "__main__":
                 if args.use_flow_prior:
                     sampled_z = model.latent_cnf(sampled_z, None, reverse=True).view(
                         *sampled_z.size())
-                sampled_g_z = sampled_z[:, :args.latent_size]
-                sampled_t_z = sampled_z[:, args.latent_size:]
+                sampled_g_z = sampled_z[:, :64]
+                sampled_t_z = sampled_z[:, 64:]
 
             ######################## evaluate prior with regularity constraints ########################
             if mode != 'jtvae':
