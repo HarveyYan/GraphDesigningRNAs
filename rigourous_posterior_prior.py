@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 from multiprocessing import Pool
-from tqdm import trange
+import csv
 import argparse
 import datetime
 
@@ -62,40 +62,67 @@ if __name__ == "__main__":
     assert mode in ['lstm', 'graph_lstm', 'jtvae'], \
         'mode must be one of {}'.format(['lstm', 'graph_lstm', 'jtvae'])
 
+    all_fields = ['Epoch',
+                  'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg',
+                  'Validation_post_fe_deviation_with_reg',
+                  'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg',
+                  'Validation_post_fe_deviation_no_reg',
+                  'Validation_recon_acc_no_reg_greedy', 'Validation_post_valid_no_reg_greedy',
+                  'Validation_post_fe_deviation_no_reg_greedy',
+                  'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg',
+                  'Prior_fe_deviation_no_reg',
+                  'Prior_valid_no_reg_greedy', 'Prior_fe_deviation_no_reg_greedy',
+                  'Prior_uniqueness_no_reg_greedy']
+
     expr_dir = args.expr_dir
     cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    save_dir = os.sep.join(
-        expr_dir.split(os.sep)[:-1] + [cur_time + '-rigorosity-[' + expr_dir.split('/')[-1] + ']'])
-
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-
-    lib.plot_utils.set_output_dir(save_dir)
-    lib.plot_utils.suppress_stdout()
-    logger = lib.logger.CSVLogger('run.csv', save_dir,
-                                  ['Epoch',
-                                   'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg',
-                                   'Validation_post_fe_deviation_with_reg',
-                                   'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg',
-                                   'Validation_post_fe_deviation_no_reg',
-                                   'Validation_recon_acc_no_reg_greedy', 'Validation_post_valid_no_reg_greedy',
-                                   'Validation_post_fe_deviation_no_reg_greedy',
-                                   'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg',
-                                   'Prior_fe_deviation_no_reg',
-                                   'Prior_valid_no_reg_greedy', 'Prior_fe_deviation_no_reg_greedy',
-                                   'Prior_uniqueness_no_reg_greedy'])
-
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    save_dir = os.path.join(expr_dir, 'rigorosity')
 
     epochs_to_load = []
     for dirname in os.listdir(expr_dir):
         if dirname.startswith('model'):
             epochs_to_load.append(int(dirname.split('-')[-1]))
     epochs_to_load = list(np.sort(epochs_to_load))
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        lib.plot_utils.set_output_dir(save_dir)
+        lib.plot_utils.suppress_stdout()
+        lib.plot_utils.set_first_tick(int(epochs_to_load[0]))
+        logger = lib.logger.CSVLogger('run.csv', save_dir, all_fields)
+    else:
+        lib.plot_utils.set_output_dir(save_dir)
+        lib.plot_utils.suppress_stdout()
+
+        # load existing results
+        all_lines = []
+        reader = csv.DictReader(open(os.path.join(save_dir, 'run.csv'), 'r'))
+        for i, line in enumerate(reader):
+            if i == 0:
+                lib.plot_utils.set_first_tick(int(line['Epoch']))
+            new_line = {}
+            for key in line.keys():
+                if key == 'Epoch':
+                    epochs_to_load.remove(int(line[key]))
+                    new_line[key] = int(line[key])
+                    continue
+                new_line[key] = float(line[key])
+                lib.plot_utils.plot(key, float(line[key]))
+            all_lines.append(new_line)
+
+            lib.plot_utils.set_xlabel_for_tick(index=0, label='epoch')
+            lib.plot_utils.flush()
+            lib.plot_utils.tick(index=0)
+
+        logger = lib.logger.CSVLogger('run.csv', save_dir, all_fields)
+        for row in all_lines:
+            logger.update_with_dict(row)
+
+    epochs_to_load = list(np.sort(epochs_to_load))
     print(epochs_to_load)
 
-    lib.plot_utils.set_first_tick(int(epochs_to_load[0]))
-    mp_pool = Pool(8)
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    mp_pool = Pool(10)
 
     for enc_epoch_to_load in epochs_to_load:
         if mode == 'lstm':
@@ -132,8 +159,8 @@ if __name__ == "__main__":
 
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
         total = 0
-        bar = trange(nb_iters, desc='', leave=True)
-        loader = loader.__iter__()
+        # bar = trange(nb_iters, desc='', leave=True)
+        # loader = loader.__iter__()
         nb_encode, nb_decode = 5, 5
 
         recon_acc, post_valid, post_fe_deviation = 0, 0, 0.
@@ -146,10 +173,10 @@ if __name__ == "__main__":
 
         with torch.no_grad():
 
-            for i in bar:
-                # for i, batch_input in enumerate(loader):
+            # for i in bar:
+            for i, batch_input in enumerate(loader):
 
-                batch_input = next(loader)
+                # batch_input = next(loader)
 
                 if mode == 'lstm':
                     original_data, batch_sequence, batch_label, batch_fe = batch_input
@@ -238,11 +265,11 @@ if __name__ == "__main__":
                 post_valid_noreg_det += np.sum(batch_post_valid)
                 post_fe_deviation_noreg_det += np.sum(batch_post_fe_deviation)
 
-                bar.set_description(
-                    'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
-                    % (recon_acc / total * 100, post_valid / total * 100, post_fe_deviation / post_valid))
-
-            bar.refresh()
+            #     bar.set_description(
+            #         'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
+            #         % (recon_acc / total * 100, post_valid / total * 100, post_fe_deviation / post_valid))
+            #
+            # bar.refresh()
 
             # posterior decoding with enforced RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100)
@@ -303,7 +330,7 @@ if __name__ == "__main__":
 
             prior_valid_reg_sto += np.sum(prior_valid)
             prior_fe_deviation_reg_sto += np.sum(prior_fe_deviation)
-
+            print('mark1')
             ######################## evaluate prior without regularity constraints ########################
             if mode != 'jtvae':
                 prior_valid, prior_fe_deviation, ret, decoded_seq, decoded_struct = baseline_evaluate_prior(
@@ -324,7 +351,7 @@ if __name__ == "__main__":
 
             prior_valid_noreg_sto += np.sum(prior_valid)
             prior_fe_deviation_noreg_sto += np.sum(prior_fe_deviation)
-
+            print('mark2')
             ######################## evaluate prior without regularity constraints and greedy ########################
             if mode != 'jtvae':
                 prior_valid, prior_fe_deviation, ret, decoded_seq, decoded_struct = baseline_evaluate_prior(
@@ -352,7 +379,7 @@ if __name__ == "__main__":
 
             prior_valid_noreg_det += np.sum(prior_valid)
             prior_fe_deviation_noreg_det += np.sum(prior_fe_deviation)
-
+            print('mark3')
             lib.plot_utils.plot('Prior_valid_with_reg', prior_valid_reg_sto / 1000)
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', prior_fe_deviation_reg_sto / prior_valid_reg_sto)
 
