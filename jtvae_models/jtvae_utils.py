@@ -49,11 +49,12 @@ def posterior_check_subroutine(args):
 
 
 def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, tree_latent_vec, mp_pool,
-                       nb_encode=10, nb_decode=10, enforce_rna_prior=True, prob_decode=True, ret_decoded=False):
+                       nb_encode=10, nb_decode=10, enforce_rna_prior=True, prob_decode=True):
     batch_size = len(original_sequence)
     recon_acc = [0] * batch_size
     posterior_valid = [0] * batch_size
     posterior_fe_deviation = [0] * batch_size
+    posterior_fe_deviation_len_normed = [0] * batch_size
     batch_idx = list(range(batch_size))
 
     original_sequence = original_sequence * nb_encode
@@ -87,14 +88,19 @@ def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, 
                                          all_parsed_trees))))
 
     for i, r in enumerate(ret):
-        recon_acc[batch_idx[i]] += r[0]
-        posterior_valid[batch_idx[i]] += r[1]
-        posterior_fe_deviation[batch_idx[i]] += r[2]
+        if r[1] > 1:
+            recon_acc[batch_idx[i]] += r[0]
+            posterior_valid[batch_idx[i]] += r[1]
+            posterior_fe_deviation[batch_idx[i]] += r[2]
+            posterior_fe_deviation_len_normed[batch_idx[i]] += r[2] / len(all_parsed_trees[i].rna_seq)
 
-    if ret_decoded:
-        return recon_acc, posterior_valid, posterior_fe_deviation, all_parsed_trees
-    else:
-        return recon_acc, posterior_valid, posterior_fe_deviation
+    return {
+        'recon_acc': recon_acc,
+        'posterior_valid': posterior_valid,
+        'posterior_fe_deviation': posterior_fe_deviation,
+        'posterior_fe_deviation_len_normed': posterior_fe_deviation_len_normed,
+        'all_parsed_trees': all_parsed_trees,
+    }
 
 
 def prior_check_subroutine(d_tree):
@@ -108,6 +114,7 @@ def prior_check_subroutine(d_tree):
 def evaluate_prior(g_z_vec, t_z_vec, nb_samples, nb_decode, mp_pool, enforce_rna_prior=True, prob_decode=True):
     prior_valid = [0] * nb_samples
     prior_fe_deviation = [0] * nb_samples
+    prior_fe_deviation_len_normed = [0] * nb_samples
     batch_idx = list(range(nb_samples))
 
     batch_idx = batch_idx * nb_decode
@@ -129,7 +136,14 @@ def evaluate_prior(g_z_vec, t_z_vec, nb_samples, nb_decode, mp_pool, enforce_rna
                                          all_parsed_trees)))
 
     for i, r in enumerate(ret):
-        prior_valid[batch_idx[i]] += r[0]
-        prior_fe_deviation[batch_idx[i]] += r[1]
+        if r[0] > 0:
+            prior_valid[batch_idx[i]] += r[0]
+            prior_fe_deviation[batch_idx[i]] += r[1]
+            prior_fe_deviation_len_normed[batch_idx[i]] += r[1] / len(all_parsed_trees[i].rna_seq)
 
-    return prior_valid, prior_fe_deviation, all_parsed_trees
+    return {
+        'prior_valid': prior_valid,
+        'prior_fe_deviation': prior_fe_deviation,
+        'prior_fe_deviation_len_normed': prior_fe_deviation_len_normed,
+        'all_parsed_trees': all_parsed_trees
+    }

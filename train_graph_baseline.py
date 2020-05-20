@@ -79,20 +79,30 @@ if __name__ == "__main__":
                                    'Validation_all_Symbol',
                                    'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg',
                                    'Validation_post_fe_deviation_with_reg',
+                                   'Validation_post_fe_deviation_len_normed_with_reg',
                                    'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg',
                                    'Validation_post_fe_deviation_no_reg',
-                                   'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg',
-                                   'Prior_fe_deviation_no_reg',
+                                   'Validation_post_fe_deviation_len_normed_no_reg',
+                                   'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg',
+                                   'Prior_fe_deviation_len_normed_with_reg',
+                                   'Prior_valid_no_reg', 'Prior_fe_deviation_no_reg',
+                                   'Prior_fe_deviation_len_normed_no_reg',
                                    'Prior_valid_no_reg_greedy', 'Prior_fe_deviation_no_reg_greedy',
-                                   'Prior_uniqueness_no_reg_greedy',
-                                   'Validation_mutual_information', 'Validation_NLL_IW_100', 'Validation_active_units'])
+                                   'Prior_fe_deviation_len_normed_no_reg_greedy',
+                                   'Prior_uniqueness_no_reg_greedy', 'Validation_mutual_information',
+                                   'Validation_NLL_IW_100', 'Validation_active_units'])
 
     mp_pool = Pool(8)
 
     for epoch in range(1, args.epoch + 1):
 
+        if epoch > args.warmup_epoch:
+            beta = min(args.max_beta, beta + args.step_beta)
+
         loader = BasicLSTMVAEFolder('data/rna_jt_32-512/train-split', args.batch_size, num_workers=4,
                                     limit_data=args.limit_data)
+
+        model.train()
         for batch in loader:
             original_data, batch_sequence, batch_label, batch_fe, batch_graph_input = batch
             total_step += 1
@@ -143,9 +153,6 @@ if __name__ == "__main__":
         # scheduler.step(epoch)
         # print("learning rate: %.6f" % scheduler.get_lr()[0])
 
-        if epoch >= args.warmup_epoch:
-            beta = min(args.max_beta, beta + args.step_beta)
-
         # save model at the end of each epoch
         torch.save(
             {'model_weights': model.state_dict(),
@@ -164,8 +171,8 @@ if __name__ == "__main__":
         # loader = loader.__iter__()
         nb_encode, nb_decode = 4, 4
 
-        recon_acc, post_valid, post_fe_deviation = 0, 0, 0.
-        recon_acc_noreg, post_valid_noreg, post_fe_deviation_noreg = 0, 0, 0.
+        recon_acc, post_valid, post_fe_deviation, post_fe_deviation_len_normed = 0, 0, 0., 0.
+        recon_acc_noreg, post_valid_noreg, post_fe_deviation_noreg, post_fe_deviation_noreg_len_normed = 0, 0, 0., 0.
         valid_kl, valid_stop_symbol, \
         valid_nuc_symbol, valid_struct_symbol, valid_all_symbol = 0., 0., 0., 0., 0.
         valid_entropy, valid_neg_log_prior = 0., 0.
@@ -173,30 +180,31 @@ if __name__ == "__main__":
         total_mi = 0.
         nll_iw = 0.
 
+        model.eval()
         with torch.no_grad():
             # for i in bar:
             for i, (original_data, batch_sequence, batch_label, batch_fe, batch_graph_input) in enumerate(loader):
                 latent_vec = model.encode(batch_graph_input)
 
                 if i < post_max_iters:
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation = \
-                        evaluate_posterior(list(np.array(original_data)[:, 0]), list(np.array(original_data)[:, 1]),
-                                           latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                           enforce_rna_prior=True)
+                    ret = evaluate_posterior(list(np.array(original_data)[:, 0]), list(np.array(original_data)[:, 1]),
+                                             latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
+                                             enforce_rna_prior=True)
 
                     total += nb_encode * nb_decode * valid_batch_size
-                    recon_acc += np.sum(batch_recon_acc)
-                    post_valid += np.sum(batch_post_valid)
-                    post_fe_deviation += np.sum(batch_post_fe_deviation)
+                    recon_acc += np.sum(ret['recon_acc'])
+                    post_valid += np.sum(ret['posterior_valid'])
+                    post_fe_deviation += np.sum(ret['posterior_fe_deviation'])
+                    post_fe_deviation_len_normed += np.sum(ret['post_fe_deviation_len_normed'])
 
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation = \
-                        evaluate_posterior(list(np.array(original_data)[:, 0]), list(np.array(original_data)[:, 1]),
-                                           latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                           enforce_rna_prior=False)
+                    ret = evaluate_posterior(list(np.array(original_data)[:, 0]), list(np.array(original_data)[:, 1]),
+                                             latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
+                                             enforce_rna_prior=False)
 
-                    recon_acc_noreg += np.sum(batch_recon_acc)
-                    post_valid_noreg += np.sum(batch_post_valid)
-                    post_fe_deviation_noreg += np.sum(batch_post_fe_deviation)
+                    recon_acc_noreg += np.sum(ret['recon_acc'])
+                    post_valid_noreg += np.sum(ret['posterior_valid'])
+                    post_fe_deviation_noreg += np.sum(ret['posterior_fe_deviation'])
+                    post_fe_deviation_noreg_len_normed += np.sum(ret['post_fe_deviation_noreg_len_normed'])
 
                 #     bar.set_description(
                 #         'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
@@ -234,13 +242,18 @@ if __name__ == "__main__":
             # posterior decoding with enforced RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_valid_with_reg', post_valid / total * 100, index=1)
-            lib.plot_utils.plot('Validation_post_fe_deviation_with_reg', post_fe_deviation / post_valid, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_with_reg',
+                                post_fe_deviation / post_valid, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_with_reg',
+                                post_fe_deviation_noreg_len_normed / post_valid, index=1)
 
             # posterior decoding without RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
-            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg,
-                                index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg',
+                                post_fe_deviation_noreg / post_valid_noreg, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg',
+                                post_fe_deviation_noreg_len_normed / post_valid_noreg, index=1)
 
             ######################## sampling from the prior ########################
             sampled_latent_prior = torch.as_tensor(np.random.randn(1000, args.latent_size).astype(np.float32)).to(
@@ -250,28 +263,35 @@ if __name__ == "__main__":
                     *sampled_latent_prior.size())
 
             ######################## evaluate prior with regularity constraints ########################
-            prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
-                                                                   enforce_rna_prior=True)
-            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100 = /100
-            lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid),
-                                index=1)
+            ret = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool, enforce_rna_prior=True)
+            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(ret['prior_valid']) / 100,
+                                index=1)  # /10000 * 100 = /100
+            lib.plot_utils.plot('Prior_fe_deviation_with_reg',
+                                np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_with_reg',
+                                np.sum(ret['prior_fe_deviation_len_normed']) / np.sum(ret['prior_valid']), index=1)
 
             ######################## evaluate prior without regularity constraints ########################
-            prior_valid, prior_fe_deviation, _, _ = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool,
-                                                                   enforce_rna_prior=False)
-            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 100, index=1)  # /10000 * 100 = /100
-            lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            ret = evaluate_prior(sampled_latent_prior, 1000, 10, mp_pool, enforce_rna_prior=False)
+            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(ret['prior_valid']) / 100, index=1)  # /10000 * 100 = /100
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg',
+                                np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg',
+                                np.sum(ret['prior_fe_deviation_len_normed']) / np.sum(ret['prior_valid']), index=1)
 
             ######################## evaluate prior without regularity constraints and greedy ########################
-            prior_valid, prior_fe_deviation, decoded_seq, _ = evaluate_prior(sampled_latent_prior, 1000, 1, mp_pool,
-                                                                             enforce_rna_prior=False, prob_decode=False)
-            decoded_seq = decoded_seq[:1000]
-            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
-            lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
-                                index=1)
+            ret = evaluate_prior(sampled_latent_prior, 1000, 1, mp_pool, enforce_rna_prior=False, prob_decode=False)
+            decoded_seq = ret['decoded_seq'][:1000]
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(ret['prior_valid']) / 10,
+                                index=1)  # /1000 * 100 = /10
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy',
+                                np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg_greedy',
+                                np.sum(ret['prior_fe_deviation_len_normed']) / np.sum(ret['prior_valid']), index=1)
             lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy',
-                                len(set(list(np.array(decoded_seq)[np.where(np.array(prior_valid) > 0)[0]]))) / np.sum(
-                                    prior_valid) * 100, index=1)
+                                len(set(list(
+                                    np.array(decoded_seq)[np.where(np.array(ret['prior_valid']) > 0)[0]]))) / np.sum(
+                                    ret['prior_valid']) * 100, index=1)
 
             cur_mi = total_mi / nb_iters
             lib.plot_utils.plot('Validation_mutual_information', cur_mi, index=1)

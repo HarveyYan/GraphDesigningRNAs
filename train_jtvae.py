@@ -98,10 +98,15 @@ if __name__ == "__main__":
          'Validation_Node_Acc', 'Validation_Nuc_Stop_Acc', 'Validation_Nuc_Ord_Acc',
          'Validation_Nuc_Acc', 'Validation_Topo_Acc', 'Validation_recon_acc_with_reg',
          'Validation_post_valid_with_reg', 'Validation_post_fe_deviation_with_reg',
+         'Validation_post_fe_deviation_len_normed_with_reg',
          'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg',
-         'Validation_post_fe_deviation_no_reg', 'Prior_valid_with_reg',
-         'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg', 'Prior_fe_deviation_no_reg',
+         'Validation_post_fe_deviation_no_reg',
+         'Validation_post_fe_deviation_len_normed_no_reg', 'Prior_valid_with_reg',
+         'Prior_fe_deviation_with_reg', 'Prior_fe_deviation_len_normed_with_reg',
+         'Prior_valid_no_reg', 'Prior_fe_deviation_no_reg',
+         'Prior_fe_deviation_len_normed_no_reg',
          'Prior_valid_no_reg_greedy', 'Prior_fe_deviation_no_reg_greedy',
+         'Prior_fe_deviation_len_normed_no_reg_greedy',
          'Prior_uniqueness_no_reg_greedy', 'Validation_mutual_information', 'Validation_NLL_IW_100',
          'Validation_active_units'])
 
@@ -120,6 +125,10 @@ if __name__ == "__main__":
         epoch_to_start = 1
 
     for epoch in range(epoch_to_start, args.epoch + 1):
+
+        if epoch > args.warmup_epoch:
+            beta = min(args.max_beta, beta + args.step_beta)
+
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
                                     num_workers=8, tree_encoder_arch=args.tree_encoder_arch,
                                     limit_data=args.limit_data)
@@ -175,9 +184,6 @@ if __name__ == "__main__":
         # scheduler.step(epoch)
         # print("learning rate: %.6f" % scheduler.get_lr()[0])
 
-        if epoch >= args.warmup_epoch:
-            beta = min(args.max_beta, beta + args.step_beta)
-
         # save model at the end of each epoch
         torch.save(
             {'model_weights': model.state_dict(),
@@ -199,8 +205,8 @@ if __name__ == "__main__":
         # loader = loader.__iter__()
         nb_encode, nb_decode = 4, 4
 
-        recon_acc, post_valid, post_fe_deviation = 0, 0, 0.
-        recon_acc_noreg, post_valid_noreg, post_fe_deviation_noreg = 0, 0, 0.
+        recon_acc, post_valid, post_fe_deviation, post_fe_deviation_len_normed = 0, 0, 0., 0.
+        recon_acc_noreg, post_valid_noreg, post_fe_deviation_noreg, post_fe_deviation_noreg_len_normed = 0, 0, 0., 0.
         valid_kl, valid_node_acc, valid_nuc_stop_acc, valid_nuc_ord_acc, \
         valid_nuc_acc, valid_topo_acc = 0., 0., 0., 0., 0., 0.
 
@@ -212,7 +218,7 @@ if __name__ == "__main__":
         with torch.no_grad():
 
             for i, batch in enumerate(loader):
-            # for i in bar:
+                # for i in bar:
 
                 tree_batch, graph_encoder_input, tree_encoder_input = batch
                 # tree_batch, graph_encoder_input, tree_encoder_input = next(loader)
@@ -221,24 +227,24 @@ if __name__ == "__main__":
                 if i < post_max_iters:
                     all_seq = [''.join(tree.rna_seq) for tree in tree_batch]
                     all_struct = [''.join(tree.rna_struct) for tree in tree_batch]
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation = \
-                        evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
-                                           mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                           enforce_rna_prior=True)
+                    ret = evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
+                                             mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
+                                             enforce_rna_prior=True)
 
                     total += nb_encode * nb_decode * valid_batch_size
-                    recon_acc += np.sum(batch_recon_acc)
-                    post_valid += np.sum(batch_post_valid)
-                    post_fe_deviation += np.sum(batch_post_fe_deviation)
+                    recon_acc += np.sum(ret['recon_acc'])
+                    post_valid += np.sum(ret['posterior_valid'])
+                    post_fe_deviation += np.sum(ret['posterior_fe_deviation'])
+                    post_fe_deviation_len_normed += np.sum(ret['post_fe_deviation_len_normed'])
 
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation = \
-                        evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
-                                           mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                           enforce_rna_prior=False)
+                    ret = evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
+                                             mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
+                                             enforce_rna_prior=False)
 
-                    recon_acc_noreg += np.sum(batch_recon_acc)
-                    post_valid_noreg += np.sum(batch_post_valid)
-                    post_fe_deviation_noreg += np.sum(batch_post_fe_deviation)
+                    recon_acc_noreg += np.sum(ret['recon_acc'])
+                    post_valid_noreg += np.sum(ret['posterior_valid'])
+                    post_fe_deviation_noreg += np.sum(ret['posterior_fe_deviation'])
+                    post_fe_deviation_noreg_len_normed += np.sum(ret['post_fe_deviation_noreg_len_normed'])
 
                 #     bar.set_description(
                 #         'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
@@ -279,12 +285,18 @@ if __name__ == "__main__":
             # posterior decoding with enforced RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_valid_with_reg', post_valid / total * 100, index=1)
-            lib.plot_utils.plot('Validation_post_fe_deviation_with_reg', post_fe_deviation / post_valid, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_with_reg',
+                                post_fe_deviation / post_valid, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_with_reg',
+                                post_fe_deviation_noreg_len_normed / post_valid, index=1)
 
             # posterior decoding without RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
-            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg',
+                                post_fe_deviation_noreg / post_valid_noreg, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg',
+                                post_fe_deviation_noreg_len_normed / post_valid_noreg, index=1)
 
             ######################## sampling from the prior ########################
             sampled_g_z = torch.as_tensor(np.random.randn(1000, args.latent_size).
@@ -299,30 +311,39 @@ if __name__ == "__main__":
             sampled_t_z = sampled_z[:, args.latent_size:]
 
             ######################## evaluate prior with regularity constraints ########################
-            prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
-                                                                enforce_rna_prior=True)
-            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
-            lib.plot_utils.plot('Prior_fe_deviation_with_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            ret = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool, enforce_rna_prior=True)
+            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(ret['prior_valid']) / 100,
+                                index=1)  # /10000 * 100 = /100
+            lib.plot_utils.plot('Prior_fe_deviation_with_reg',
+                                np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_with_reg',
+                                np.sum(ret['prior_fe_deviation_len_normed']) / np.sum(ret['prior_valid']), index=1)
 
             ######################## evaluate prior without regularity constraints ########################
-            prior_valid, prior_fe_deviation, _ = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
-                                                                enforce_rna_prior=False)
-            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
-            lib.plot_utils.plot('Prior_fe_deviation_no_reg', np.sum(prior_fe_deviation) / np.sum(prior_valid), index=1)
+            ret = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool, enforce_rna_prior=False)
+            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(ret['prior_valid']) / 100, index=1)  # /10000 * 100 = /100
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg',
+                                np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg',
+                                np.sum(ret['prior_fe_deviation_len_normed']) / np.sum(ret['prior_valid']), index=1)
 
             ######################## evaluate prior without regularity constraints and greedy ########################
-            prior_valid, prior_fe_deviation, parsed_trees = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
-                                                                           enforce_rna_prior=False, prob_decode=False)
-            decoded_seq = [''.join(tree.rna_seq) for tree in parsed_trees[:1000] if
+            ret = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool,
+                                 enforce_rna_prior=False, prob_decode=False)
+            decoded_seq = [''.join(tree.rna_seq) for tree in ret['all_parsed_trees'][:1000] if
                            type(tree) is RNAJunctionTree and tree.is_valid]
-            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(prior_valid) / 10, index=1)  # /1000 * 100 = /10
-            lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy', np.sum(prior_fe_deviation) / np.sum(prior_valid),
-                                index=1)
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', np.sum(ret['prior_valid']) / 10,
+                                index=1)  # /1000 * 100 = /10
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy',
+                                np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg_greedy',
+                                np.sum(ret['prior_fe_deviation_len_normed']) / np.sum(ret['prior_valid']), index=1)
             if len(decoded_seq) == 0:
                 lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', 0.,
                                     index=1)
             else:
-                lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / len(decoded_seq) * 100, index=1)
+                lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy', len(set(decoded_seq)) / len(decoded_seq) * 100,
+                                    index=1)
 
             ######################## mutual information ########################
             cur_mi = total_mi / nb_iters

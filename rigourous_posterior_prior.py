@@ -4,7 +4,6 @@ import numpy as np
 from multiprocessing import Pool
 import csv
 import argparse
-import datetime
 
 from baseline_models.FlowLSTMVAE import LSTMVAE, BasicLSTMVAEFolder
 from baseline_models.GraphLSTMVAE import GraphLSTMVAE
@@ -65,17 +64,22 @@ if __name__ == "__main__":
     all_fields = ['Epoch',
                   'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg',
                   'Validation_post_fe_deviation_with_reg',
+                  'Validation_post_fe_deviation_len_normed_with_reg',
                   'Validation_recon_acc_no_reg', 'Validation_post_valid_no_reg',
                   'Validation_post_fe_deviation_no_reg',
+                  'Validation_post_fe_deviation_len_normed_no_reg',
                   'Validation_recon_acc_no_reg_greedy', 'Validation_post_valid_no_reg_greedy',
                   'Validation_post_fe_deviation_no_reg_greedy',
-                  'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg', 'Prior_valid_no_reg',
-                  'Prior_fe_deviation_no_reg',
+                  'Validation_post_fe_deviation_len_normed_no_reg_greedy',
+                  'Prior_valid_with_reg', 'Prior_fe_deviation_with_reg',
+                  'Prior_fe_deviation_len_normed_with_reg',
+                  'Prior_valid_no_reg', 'Prior_fe_deviation_no_reg',
+                  'Prior_fe_deviation_len_normed_no_reg',
                   'Prior_valid_no_reg_greedy', 'Prior_fe_deviation_no_reg_greedy',
+                  'Prior_fe_deviation_len_normed_no_reg_greedy',
                   'Prior_uniqueness_no_reg_greedy']
 
     expr_dir = args.expr_dir
-    cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     save_dir = os.path.join(expr_dir, 'rigorosity')
 
     epochs_to_load = []
@@ -163,9 +167,9 @@ if __name__ == "__main__":
         # loader = loader.__iter__()
         nb_encode, nb_decode = 5, 5
 
-        recon_acc, post_valid, post_fe_deviation = 0, 0, 0.
-        recon_acc_noreg, post_valid_noreg, post_fe_deviation_noreg = 0, 0, 0.
-        recon_acc_noreg_det, post_valid_noreg_det, post_fe_deviation_noreg_det = 0, 0, 0.
+        recon_acc, post_valid, post_fe_deviation, post_fe_deviation_len_normed = 0, 0, 0., 0.
+        recon_acc_noreg, post_valid_noreg, post_fe_deviation_noreg, post_fe_deviation_noreg_len_normed = 0, 0, 0., 0.
+        recon_acc_noreg_det, post_valid_noreg_det, post_fe_deviation_noreg_det, post_fe_deviation_noreg_det_len_normed = 0, 0, 0., 0.
 
         epoch_dir = os.path.join(save_dir, 'epoch-%d' % (enc_epoch_to_load))
         if not os.path.exists(epoch_dir):
@@ -192,78 +196,78 @@ if __name__ == "__main__":
 
                 ####################### evaluate posterior with regularity constraints ########################
                 if mode != 'jtvae':
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation, ret, decoded_seq, decoded_struct = \
-                        baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
-                                                    list(np.array(original_data)[:, 1]),
-                                                    latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                                    enforce_rna_prior=True, ret_decoded=True)
+                    ret_dict = baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
+                                                           list(np.array(original_data)[:, 1]),
+                                                           latent_vec, mp_pool, nb_encode=nb_encode,
+                                                           nb_decode=nb_decode,
+                                                           enforce_rna_prior=True)
                     write_baseline_seq_struct(
                         os.path.join(epoch_dir, 'valid-post-sto-reg-{}.fa')
-                        , i, np.array(ret)[:, 1], decoded_seq, decoded_struct)
+                        , i, np.array(ret_dict['ret'])[:, 1], ret_dict['decoded_seq'], ret_dict['decoded_struct'])
 
                 else:
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation, parsed_trees = \
-                        jt_evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
-                                              mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                              enforce_rna_prior=True, ret_decoded=True)
+                    ret_dict = jt_evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
+                                                     mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
+                                                     enforce_rna_prior=True)
 
                     write_jt_seq_struct(
-                        os.path.join(epoch_dir, 'valid-post-sto-reg-{}.fa'), i, parsed_trees)
+                        os.path.join(epoch_dir, 'valid-post-sto-reg-{}.fa'), i, ret_dict['all_parsed_trees'])
 
                 total += nb_encode * nb_decode * valid_batch_size
-                recon_acc += np.sum(batch_recon_acc)
-                post_valid += np.sum(batch_post_valid)
-                post_fe_deviation += np.sum(batch_post_fe_deviation)
+                recon_acc += np.sum(ret_dict['recon_acc'])
+                post_valid += np.sum(ret_dict['posterior_valid'])
+                post_fe_deviation += np.sum(ret_dict['posterior_fe_deviation'])
+                post_fe_deviation_len_normed += np.sum(ret_dict['post_fe_deviation_len_normed'])
 
                 ####################### evaluate posterior without regularity constraints ########################
                 if mode != 'jtvae':
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation, ret, decoded_seq, decoded_struct = \
-                        baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
-                                                    list(np.array(original_data)[:, 1]),
-                                                    latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                                    enforce_rna_prior=False, ret_decoded=True)
+                    ret_dict = baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
+                                                           list(np.array(original_data)[:, 1]),
+                                                           latent_vec, mp_pool, nb_encode=nb_encode,
+                                                           nb_decode=nb_decode,
+                                                           enforce_rna_prior=False)
 
                     write_baseline_seq_struct(
                         os.path.join(epoch_dir, 'valid-post-sto-noreg-{}.fa')
-                        , i, np.array(ret)[:, 1], decoded_seq, decoded_struct)
+                        , i, np.array(ret_dict['ret'])[:, 1], ret_dict['decoded_seq'], ret_dict['decoded_struct'])
 
                 else:
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation, parsed_trees = \
-                        jt_evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
-                                              mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                              enforce_rna_prior=False, ret_decoded=True)
+                    ret_dict = jt_evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
+                                                     mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
+                                                     enforce_rna_prior=False)
 
                     write_jt_seq_struct(
-                        os.path.join(epoch_dir, 'valid-post-sto-noreg-{}.fa'), i, parsed_trees)
+                        os.path.join(epoch_dir, 'valid-post-sto-noreg-{}.fa'), i, ret_dict['all_parsed_trees'])
 
-                recon_acc_noreg += np.sum(batch_recon_acc)
-                post_valid_noreg += np.sum(batch_post_valid)
-                post_fe_deviation_noreg += np.sum(batch_post_fe_deviation)
+                recon_acc_noreg += np.sum(ret_dict['recon_acc'])
+                post_valid_noreg += np.sum(ret_dict['posterior_valid'])
+                post_fe_deviation_noreg += np.sum(ret_dict['posterior_fe_deviation'])
+                post_fe_deviation_noreg_len_normed += np.sum(ret_dict['post_fe_deviation_noreg_len_normed'])
 
                 ####################### evaluate posterior without regularity constraints and greedy ########################
                 if mode != 'jtvae':
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation, ret, decoded_seq, decoded_struct = \
-                        baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
-                                                    list(np.array(original_data)[:, 1]),
-                                                    latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                                    prob_decode=False, enforce_rna_prior=False, ret_decoded=True)
+                    ret_dict = baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
+                                                           list(np.array(original_data)[:, 1]),
+                                                           latent_vec, mp_pool, nb_encode=nb_encode,
+                                                           nb_decode=nb_decode,
+                                                           prob_decode=False, enforce_rna_prior=False)
 
                     write_baseline_seq_struct(
                         os.path.join(epoch_dir, 'valid-post-det-noreg-{}.fa')
-                        , i, np.array(ret)[:, 1], decoded_seq, decoded_struct)
+                        , i, np.array(ret_dict['ret'])[:, 1], ret_dict['decoded_seq'], ret_dict['decoded_struct'])
 
                 else:
-                    batch_recon_acc, batch_post_valid, batch_post_fe_deviation, parsed_trees = \
-                        jt_evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
-                                              mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
-                                              enforce_rna_prior=False, prob_decode=False, ret_decoded=True)
+                    ret_dict = jt_evaluate_posterior(all_seq, all_struct, graph_vectors, tree_vectors,
+                                                     mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
+                                                     enforce_rna_prior=False, prob_decode=False)
 
                     write_jt_seq_struct(
-                        os.path.join(epoch_dir, 'valid-post-det-noreg-{}.fa'), i, parsed_trees)
+                        os.path.join(epoch_dir, 'valid-post-det-noreg-{}.fa'), i, ret_dict['all_parsed_trees'])
 
-                recon_acc_noreg_det += np.sum(batch_recon_acc)
-                post_valid_noreg_det += np.sum(batch_post_valid)
-                post_fe_deviation_noreg_det += np.sum(batch_post_fe_deviation)
+                recon_acc_noreg_det += np.sum(ret_dict['recon_acc'])
+                post_valid_noreg_det += np.sum(ret_dict['posterior_valid'])
+                post_fe_deviation_noreg_det += np.sum(ret_dict['posterior_fe_deviation'])
+                post_fe_deviation_noreg_det_len_normed += np.sum(ret_dict['post_fe_deviation_noreg_len_normed'])
 
             #     bar.set_description(
             #         'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
@@ -275,21 +279,27 @@ if __name__ == "__main__":
             lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100)
             lib.plot_utils.plot('Validation_post_valid_with_reg', post_valid / total * 100)
             lib.plot_utils.plot('Validation_post_fe_deviation_with_reg', post_fe_deviation / post_valid)
+            lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_with_reg',
+                                post_fe_deviation_len_normed / post_valid)
 
             # posterior decoding without RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100)
             lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100)
             lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg)
+            lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg',
+                                post_fe_deviation_noreg_len_normed / post_valid_noreg)
 
             # posterior decoding without RNA regularity and deterministic
             lib.plot_utils.plot('Validation_recon_acc_no_reg_greedy', recon_acc_noreg_det / total * 100)
             lib.plot_utils.plot('Validation_post_valid_no_reg_greedy', post_valid_noreg_det / total * 100)
             lib.plot_utils.plot('Validation_post_fe_deviation_no_reg_greedy',
                                 post_fe_deviation_noreg_det / post_valid_noreg_det)
+            lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg_greedy',
+                                post_fe_deviation_noreg_det_len_normed / post_valid_noreg_det)
 
-            prior_valid_reg_sto, prior_fe_deviation_reg_sto = 0., 0.
-            prior_valid_noreg_sto, prior_fe_deviation_noreg_sto = 0., 0.
-            prior_valid_noreg_det, prior_fe_deviation_noreg_det, prior_uniqueness_noreg_det = 0., 0., 0
+            prior_valid_reg_sto, prior_fe_deviation_reg_sto, prior_fe_deviation_reg_sto_len_normed = 0., 0., 0.
+            prior_valid_noreg_sto, prior_fe_deviation_noreg_sto, prior_fe_deviation_noreg_sto_len_normed = 0., 0., 0.
+            prior_valid_noreg_det, prior_fe_deviation_noreg_det, prior_fe_deviation_noreg_det_len_normed, prior_uniqueness_noreg_det = 0., 0., 0., 0
 
             ####################### sampling from the prior ########################
             if mode != 'jtvae':
@@ -312,83 +322,92 @@ if __name__ == "__main__":
 
             ######################## evaluate prior with regularity constraints ########################
             if mode != 'jtvae':
-                prior_valid, prior_fe_deviation, ret, decoded_seq, decoded_struct = baseline_evaluate_prior(
+                ret_dict = baseline_evaluate_prior(
                     sampled_latent_prior, 10000, 10, mp_pool,
-                    enforce_rna_prior=True, ret_decoded=True)
+                    enforce_rna_prior=True)
 
                 write_baseline_seq_struct(
                     os.path.join(epoch_dir, 'prior-sto-reg-{}.fa')
-                    , 0, np.array(ret)[:, 0], decoded_seq, decoded_struct)
+                    , 0, np.array(ret_dict['ret'])[:, 0], ret_dict['decoded_seq'], ret_dict['decoded_struct'])
 
             else:
-                prior_valid, prior_fe_deviation, parsed_trees = jt_evaluate_prior(
+                ret_dict = jt_evaluate_prior(
                     sampled_g_z, sampled_t_z, 10000, 10, mp_pool,
                     enforce_rna_prior=True)
 
                 write_jt_seq_struct(
-                    os.path.join(epoch_dir, 'prior-sto-reg-{}.fa'), 0, parsed_trees)
+                    os.path.join(epoch_dir, 'prior-sto-reg-{}.fa'), 0, ret_dict['all_parsed_trees'])
 
-            prior_valid_reg_sto += np.sum(prior_valid)
-            prior_fe_deviation_reg_sto += np.sum(prior_fe_deviation)
-            print('mark1')
+            prior_valid_reg_sto += np.sum(ret_dict['prior_valid'])
+            prior_fe_deviation_reg_sto += np.sum(ret_dict['prior_fe_deviation'])
+            prior_fe_deviation_reg_sto_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
+
             ######################## evaluate prior without regularity constraints ########################
             if mode != 'jtvae':
-                prior_valid, prior_fe_deviation, ret, decoded_seq, decoded_struct = baseline_evaluate_prior(
+                ret_dict = baseline_evaluate_prior(
                     sampled_latent_prior, 10000, 10, mp_pool,
-                    enforce_rna_prior=False, ret_decoded=True)
+                    enforce_rna_prior=False)
 
                 write_baseline_seq_struct(
                     os.path.join(epoch_dir, 'prior-sto-noreg-{}.fa')
-                    , 0, np.array(ret)[:, 0], decoded_seq, decoded_struct)
+                    , 0, np.array(ret_dict['ret'])[:, 0], ret_dict['decoded_seq'], ret_dict['decoded_struct'])
 
             else:
-                prior_valid, prior_fe_deviation, _ = jt_evaluate_prior(
+                ret_dict = jt_evaluate_prior(
                     sampled_g_z, sampled_t_z, 10000, 10, mp_pool,
                     enforce_rna_prior=False)
 
                 write_jt_seq_struct(
-                    os.path.join(epoch_dir, 'prior-sto-noreg-{}.fa'), 0, parsed_trees)
+                    os.path.join(epoch_dir, 'prior-sto-noreg-{}.fa'), 0, ret_dict['all_parsed_trees'])
 
-            prior_valid_noreg_sto += np.sum(prior_valid)
-            prior_fe_deviation_noreg_sto += np.sum(prior_fe_deviation)
-            print('mark2')
+            prior_valid_noreg_sto += np.sum(ret_dict['prior_valid'])
+            prior_fe_deviation_noreg_sto += np.sum(ret_dict['prior_fe_deviation'])
+            prior_fe_deviation_noreg_sto_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
+
             ######################## evaluate prior without regularity constraints and greedy ########################
             if mode != 'jtvae':
-                prior_valid, prior_fe_deviation, ret, decoded_seq, decoded_struct = baseline_evaluate_prior(
+                ret_dict = baseline_evaluate_prior(
                     sampled_latent_prior, 10000, 1, mp_pool,
-                    enforce_rna_prior=False, prob_decode=False, ret_decoded=True)
+                    enforce_rna_prior=False, prob_decode=False)
 
                 prior_uniqueness_noreg_det += len(
-                    set(list(np.array(decoded_seq)[np.where(np.array(prior_valid) > 0)[0]])))
+                    set(list(np.array(ret_dict['decoded_seq'])[np.where(np.array(ret_dict['prior_valid']) > 0)[0]])))
 
                 write_baseline_seq_struct(
                     os.path.join(epoch_dir, 'prior-det-noreg-{}.fa')
-                    , 0, np.array(ret)[:, 0], decoded_seq, decoded_struct)
+                    , 0, np.array(ret_dict['ret'])[:, 0], ret_dict['decoded_seq'], ret_dict['decoded_struct'])
 
             else:
-                prior_valid, prior_fe_deviation, parsed_trees = jt_evaluate_prior(
+                ret_dict = jt_evaluate_prior(
                     sampled_g_z, sampled_t_z, 10000, 1, mp_pool,
                     enforce_rna_prior=False, prob_decode=False)
 
-                decoded_seq = [''.join(tree.rna_seq) for tree in parsed_trees[:10000] if
+                decoded_seq = [''.join(tree.rna_seq) for tree in ret_dict['all_parsed_trees'][:10000] if
                                type(tree) is RNAJunctionTree and tree.is_valid]
                 prior_uniqueness_noreg_det += len(set(decoded_seq))
 
                 write_jt_seq_struct(
-                    os.path.join(epoch_dir, 'prior-det-noreg-{}.fa'), 0, parsed_trees)
+                    os.path.join(epoch_dir, 'prior-det-noreg-{}.fa'), 0, ret_dict['all_parsed_trees'])
 
-            prior_valid_noreg_det += np.sum(prior_valid)
-            prior_fe_deviation_noreg_det += np.sum(prior_fe_deviation)
-            print('mark3')
+            prior_valid_noreg_det += np.sum(ret_dict['prior_valid'])
+            prior_fe_deviation_noreg_det += np.sum(ret_dict['prior_fe_deviation'])
+            prior_fe_deviation_noreg_det_len_normed += np.sum(ret_dict['prior_fe_deviation_len_normed'])
+
             lib.plot_utils.plot('Prior_valid_with_reg', prior_valid_reg_sto / 1000)
             lib.plot_utils.plot('Prior_fe_deviation_with_reg', prior_fe_deviation_reg_sto / prior_valid_reg_sto)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_with_reg',
+                                prior_fe_deviation_reg_sto_len_normed / prior_valid_reg_sto)
 
             lib.plot_utils.plot('Prior_valid_no_reg', prior_valid_noreg_sto / 1000)
             lib.plot_utils.plot('Prior_fe_deviation_no_reg', prior_fe_deviation_noreg_sto / prior_valid_noreg_sto)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg',
+                                prior_fe_deviation_noreg_sto_len_normed / prior_valid_noreg_sto)
 
             lib.plot_utils.plot('Prior_valid_no_reg_greedy', prior_valid_noreg_det / 100)
             lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy',
                                 prior_fe_deviation_noreg_det / prior_valid_noreg_det)
+            lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg_greedy',
+                                prior_fe_deviation_noreg_det_len_normed / prior_valid_noreg_det)
             lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy',
                                 prior_uniqueness_noreg_det / prior_valid_noreg_det * 100)
 

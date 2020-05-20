@@ -59,11 +59,12 @@ def posterior_check_subroutine(args):
 
 
 def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_pool, nb_encode=10, nb_decode=10,
-                       prob_decode=True, enforce_rna_prior=True, ret_decoded=False):
+                       prob_decode=True, enforce_rna_prior=True):
     batch_size = len(original_sequence)
     recon_acc = [0] * batch_size
     posterior_valid = [0] * batch_size
     posterior_fe_deviation = [0] * batch_size
+    posterior_fe_deviation_len_normed = [0] * batch_size
     batch_idx = list(range(batch_size))
 
     original_sequence = original_sequence * nb_encode
@@ -93,14 +94,21 @@ def evaluate_posterior(original_sequence, original_structure, latent_vector, mp_
                                          decoded_seq, decoded_struct))))
 
     for i, r in enumerate(ret):
-        recon_acc[batch_idx[i]] += r[0]
-        posterior_valid[batch_idx[i]] += r[1]
-        posterior_fe_deviation[batch_idx[i]] += r[2]
+        if r[1] > 0:
+            recon_acc[batch_idx[i]] += r[0]
+            posterior_valid[batch_idx[i]] += r[1]
+            posterior_fe_deviation[batch_idx[i]] += r[2]
+            posterior_fe_deviation_len_normed[batch_idx[i]] += r[2] / len(decoded_seq[i])
 
-    if ret_decoded:
-        return recon_acc, posterior_valid, posterior_fe_deviation, ret, decoded_seq, decoded_struct
-    else:
-        return recon_acc, posterior_valid, posterior_fe_deviation
+    return {
+        'recon_acc': recon_acc,
+        'posterior_valid': posterior_valid,
+        'posterior_fe_deviation': posterior_fe_deviation,
+        'posterior_fe_deviation_len_normed': posterior_fe_deviation_len_normed,
+        'ret': ret,
+        'decoded_seq': decoded_seq,
+        'decoded_struct': decoded_struct
+    }
 
 
 def prior_check_subroutine(args):
@@ -114,9 +122,10 @@ def prior_check_subroutine(args):
     return ret
 
 
-def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforce_rna_prior=True, prob_decode=True, ret_decoded=False):
+def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforce_rna_prior=True, prob_decode=True):
     prior_valid = [0] * nb_samples
     prior_fe_deviation = [0] * nb_samples
+    prior_fe_deviation_len_normed = [0] * nb_samples
     batch_idx = list(range(nb_samples))
 
     batch_idx = batch_idx * nb_decode
@@ -134,10 +143,18 @@ def evaluate_prior(sampled_latent_vector, nb_samples, nb_decode, mp_pool, enforc
                                          list(zip(decoded_seq, decoded_struct)))))
 
     for i, r in enumerate(ret):
-        prior_valid[batch_idx[i]] += r[0]
-        prior_fe_deviation[batch_idx[i]] += r[1]
+        if r[0] > 0:
+            prior_valid[batch_idx[i]] += r[0]
+            prior_fe_deviation[batch_idx[i]] += r[1]
+            prior_fe_deviation_len_normed[batch_idx[i]] += r[1] / len(decoded_seq[i])
 
-    if ret_decoded:
-        return prior_valid, prior_fe_deviation, ret, decoded_seq, decoded_struct
-    else:
-        return prior_valid, prior_fe_deviation, decoded_seq, decoded_struct
+
+    return {
+        'prior_valid': prior_valid,
+        'prior_fe_deviation': prior_fe_deviation,
+        'prior_fe_deviation_len_normed': prior_fe_deviation_len_normed,
+        'ret': ret,
+        'decoded_seq': decoded_seq,
+        'decoded_struct': decoded_struct
+    }
+
