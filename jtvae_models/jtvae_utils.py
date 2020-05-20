@@ -88,7 +88,7 @@ def evaluate_posterior(original_sequence, original_structure, graph_latent_vec, 
                                          all_parsed_trees))))
 
     for i, r in enumerate(ret):
-        if r[1] > 1:
+        if r[1] > 0:
             recon_acc[batch_idx[i]] += r[0]
             posterior_valid[batch_idx[i]] += r[1]
             posterior_fe_deviation[batch_idx[i]] += r[2]

@@ -214,7 +214,7 @@ if __name__ == "__main__":
                     recon_acc += np.sum(ret['recon_acc'])
                     post_valid += np.sum(ret['posterior_valid'])
                     post_fe_deviation += np.sum(ret['posterior_fe_deviation'])
-                    post_fe_deviation_len_normed += np.sum(ret['post_fe_deviation_len_normed'])
+                    post_fe_deviation_len_normed += np.sum(ret['posterior_fe_deviation_len_normed'])
 
                     ret = evaluate_posterior(list(np.array(original_data)[:, 0]), list(np.array(original_data)[:, 1]),
                                              latent_vec, mp_pool, nb_encode=nb_encode, nb_decode=nb_decode,
@@ -223,7 +223,7 @@ if __name__ == "__main__":
                     recon_acc_noreg += np.sum(ret['recon_acc'])
                     post_valid_noreg += np.sum(ret['posterior_valid'])
                     post_fe_deviation_noreg += np.sum(ret['posterior_fe_deviation'])
-                    post_fe_deviation_noreg_len_normed += np.sum(ret['post_fe_deviation_noreg_len_normed'])
+                    post_fe_deviation_noreg_len_normed += np.sum(ret['posterior_fe_deviation_len_normed'])
 
                 #     bar.set_description(
                 #         'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f, streaming post free energy deviation length normalized: %.2f'

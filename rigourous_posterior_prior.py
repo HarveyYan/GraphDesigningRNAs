@@ -4,6 +4,7 @@ import numpy as np
 from multiprocessing import Pool
 import csv
 import argparse
+import shutil
 
 from baseline_models.FlowLSTMVAE import LSTMVAE, BasicLSTMVAEFolder
 from baseline_models.GraphLSTMVAE import GraphLSTMVAE
@@ -130,7 +131,7 @@ if __name__ == "__main__":
 
     for enc_epoch_to_load in epochs_to_load:
         if mode == 'lstm':
-            model = LSTMVAE(512, 128, 2, device=device, use_attention=True).to(device)
+            model = LSTMVAE(512, 128, 2, device=device, use_attention=True, use_aux_regressor=False).to(device)
         elif mode == 'graph_lstm':
             model = GraphLSTMVAE(
                 512, 128, 5, use_aux_regressor=False,
@@ -163,8 +164,9 @@ if __name__ == "__main__":
 
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
         total = 0
-        # bar = trange(nb_iters, desc='', leave=True)
-        # loader = loader.__iter__()
+        from tqdm import trange
+        bar = trange(nb_iters, desc='', leave=True)
+        loader = loader.__iter__()
         nb_encode, nb_decode = 5, 5
 
         recon_acc, post_valid, post_fe_deviation, post_fe_deviation_len_normed = 0, 0, 0., 0.
@@ -174,13 +176,19 @@ if __name__ == "__main__":
         epoch_dir = os.path.join(save_dir, 'epoch-%d' % (enc_epoch_to_load))
         if not os.path.exists(epoch_dir):
             os.makedirs(epoch_dir)
+        else:
+            shutil.rmtree(epoch_dir)
+            os.makedirs(epoch_dir)
 
         with torch.no_grad():
 
-            # for i in bar:
-            for i, batch_input in enumerate(loader):
+            for i in bar:
+                # for i, batch_input in enumerate(loader):
 
-                # batch_input = next(loader)
+                if i == 2:
+                    break
+
+                batch_input = next(loader)
 
                 if mode == 'lstm':
                     original_data, batch_sequence, batch_label, batch_fe = batch_input
@@ -217,7 +225,7 @@ if __name__ == "__main__":
                 recon_acc += np.sum(ret_dict['recon_acc'])
                 post_valid += np.sum(ret_dict['posterior_valid'])
                 post_fe_deviation += np.sum(ret_dict['posterior_fe_deviation'])
-                post_fe_deviation_len_normed += np.sum(ret_dict['post_fe_deviation_len_normed'])
+                post_fe_deviation_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
 
                 ####################### evaluate posterior without regularity constraints ########################
                 if mode != 'jtvae':
@@ -242,7 +250,7 @@ if __name__ == "__main__":
                 recon_acc_noreg += np.sum(ret_dict['recon_acc'])
                 post_valid_noreg += np.sum(ret_dict['posterior_valid'])
                 post_fe_deviation_noreg += np.sum(ret_dict['posterior_fe_deviation'])
-                post_fe_deviation_noreg_len_normed += np.sum(ret_dict['post_fe_deviation_noreg_len_normed'])
+                post_fe_deviation_noreg_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
 
                 ####################### evaluate posterior without regularity constraints and greedy ########################
                 if mode != 'jtvae':
@@ -267,13 +275,14 @@ if __name__ == "__main__":
                 recon_acc_noreg_det += np.sum(ret_dict['recon_acc'])
                 post_valid_noreg_det += np.sum(ret_dict['posterior_valid'])
                 post_fe_deviation_noreg_det += np.sum(ret_dict['posterior_fe_deviation'])
-                post_fe_deviation_noreg_det_len_normed += np.sum(ret_dict['post_fe_deviation_noreg_len_normed'])
+                post_fe_deviation_noreg_det_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
 
-            #     bar.set_description(
-            #         'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f'
-            #         % (recon_acc / total * 100, post_valid / total * 100, post_fe_deviation / post_valid))
-            #
-            # bar.refresh()
+                bar.set_description(
+                    'streaming recon acc: %.2f, streaming post valid: %.2f, streaming post free energy deviation: %.2f, streaming post free energy deviation length normalized: %.2f'
+                    % (recon_acc / total * 100, post_valid / total * 100, post_fe_deviation / post_valid,
+                       post_fe_deviation_len_normed / post_valid))
+
+            bar.refresh()
 
             # posterior decoding with enforced RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100)
@@ -340,7 +349,7 @@ if __name__ == "__main__":
 
             prior_valid_reg_sto += np.sum(ret_dict['prior_valid'])
             prior_fe_deviation_reg_sto += np.sum(ret_dict['prior_fe_deviation'])
-            prior_fe_deviation_reg_sto_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
+            prior_fe_deviation_reg_sto_len_normed += np.sum(ret_dict['prior_fe_deviation_len_normed'])
 
             ######################## evaluate prior without regularity constraints ########################
             if mode != 'jtvae':
@@ -362,7 +371,7 @@ if __name__ == "__main__":
 
             prior_valid_noreg_sto += np.sum(ret_dict['prior_valid'])
             prior_fe_deviation_noreg_sto += np.sum(ret_dict['prior_fe_deviation'])
-            prior_fe_deviation_noreg_sto_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
+            prior_fe_deviation_noreg_sto_len_normed += np.sum(ret_dict['prior_fe_deviation_len_normed'])
 
             ######################## evaluate prior without regularity constraints and greedy ########################
             if mode != 'jtvae':
