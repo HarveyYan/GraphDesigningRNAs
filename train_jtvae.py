@@ -115,14 +115,29 @@ if __name__ == "__main__":
 
     if args.resume:
         '''load warm-up results'''
-        weight_path = '/home/zichao/scratch/JTRNA/output/20200507-182856-512-64-5-10-maxpooled-hidden-states/model.epoch-1'
+        if args.use_flow_prior:
+            if args.limit_data is not None:
+                weight_path = '/home/zichao/scratch/JTRNA/output/20200514-160741-512-64-5-10-amsgrad-stability-mb-2e-3-sb-1e-4-limit-data/model.epoch-17'
+                epoch_to_start = 18
+                beta = 0.0012
+            else:
+                weight_path = '/home/zichao/scratch/JTRNA/output/20200514-162434-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4/model.epoch-7'
+                epoch_to_start = 8
+                beta = 0.001
+        else:
+            weight_path = '/home/zichao/scratch/JTRNA/output/20200514-163629-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4-no-flow-prior/model.epoch-8'
+            epoch_to_start = 9
+            beta = 0.0015
+
         all_weights = torch.load(weight_path)
         model.load_state_dict(all_weights['model_weights'])
         optimizer.load_state_dict(all_weights['opt_weights'])
-        print('Weights loaded from', weight_path)
-        epoch_to_start = 2
+        print('Loaded weights:', weight_path)
+        print('Loaded beta:', beta)
     else:
         epoch_to_start = 1
+
+    lib.plot_utils.set_first_tick(epoch_to_start)
 
     for epoch in range(epoch_to_start, args.epoch + 1):
 
