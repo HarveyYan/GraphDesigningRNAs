@@ -11,8 +11,11 @@ class ncRNA_EMB_Classifier(nn.Module):
         self.output_size = output_size
         self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
 
-        self.classifier_nonlinear = nn.Linear(input_size, hidden_size)
-        self.classifier_output = nn.Linear(hidden_size, output_size)
+        if self.hidden_size is not None:
+            self.classifier_nonlinear = nn.Linear(input_size, self.hidden_size)
+            self.classifier_output = nn.Linear(self.hidden_size, output_size)
+        else:
+            self.classifier_output = nn.Linear(self.input_size, output_size)
 
         '''beware multi-task learning setup'''
         self.loss = nn.CrossEntropyLoss(reduction='none')
@@ -21,10 +24,13 @@ class ncRNA_EMB_Classifier(nn.Module):
         batch_size = len(batch_input)
         batch_input = batch_input.to(self.device)
         batch_label = torch.as_tensor(batch_label.astype(np.long)).to(self.device)
-        preds = self.classifier_output(torch.relu(self.classifier_nonlinear(batch_input)))
+        if self.hidden_size is not None:
+            preds = self.classifier_output(torch.relu(self.classifier_nonlinear(batch_input)))
+        else:
+            preds = self.classifier_output(batch_input)
 
         loss = self.loss(preds, batch_label)
-        preds = torch.sigmoid(preds).cpu().detach().numpy()
+        preds = torch.softmax(preds, dim=-1).cpu().detach().numpy()
 
         ret_dict = {
             'loss': torch.sum(loss),

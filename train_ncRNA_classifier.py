@@ -2,11 +2,11 @@ import os
 import torch
 import argparse
 import torch.optim as optim
-import datetime
 import numpy as np
 from multiprocessing import Pool
 from sklearn.metrics import f1_score, matthews_corrcoef
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from ncRNA_modules.ncRNA_dataloader import convert_seq_to_embeddings, read_fasta, \
     all_classes, train_datapath, test_datapath
@@ -17,16 +17,13 @@ from baseline_models.GraphLSTMVAE import GraphLSTMVAE
 from jtvae_models.VAE import JunctionTreeVAE
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--save_dir', required=True)
-parser.add_argument('--hidden_size', type=int, default=64)
+parser.add_argument('--save_dir', type=str, default='mlp')
+parser.add_argument('--hidden_size', type=eval, default=256)
 parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--expr_path', type=str, default=
-'/home/zichao/scratch/JTRNA/lstm_baseline_output/20200429-222820-flow-prior-resumed-5e-4-1e-2')
-
+parser.add_argument('--expr_path', type=str, default='')
+parser.add_argument('--mode', type=str, default='lstm')
 parser.add_argument('--lr', type=float, default=1e-3)
-parser.add_argument('--epoch', type=int, default=10)
-
-preprocess_type = 'lstm'
+parser.add_argument('--epoch', type=int, default=100)
 
 
 def evaluate(embedding, label):
@@ -60,6 +57,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
 
+    preprocess_type = args.mode
+
     train_seq, train_label = read_fasta(train_datapath)
     test_seq, test_label = read_fasta(test_datapath)
     test_label = np.array(test_label)
@@ -87,9 +86,9 @@ if __name__ == "__main__":
     input_size = 128  # latent dimension
     output_size = len(all_classes)
 
-    cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    save_dir = '/'.join(args.save_dir.split('/')[:-1] + [cur_time + '-' + args.save_dir.split('/')[-1]])
-    save_dir += '-[%s]' % (args.expr_path.split('/')[-1])
+    save_dir = os.path.join(args.expr_path, 'ncRNA-classification-%s' % (args.save_dir))
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
 
     all_test_loss, all_test_acc, all_test_f1_macro, all_test_f1_micro, all_test_mcc = \
         [], [], [], [], []
@@ -99,19 +98,23 @@ if __name__ == "__main__":
     for enc_epoch_to_load in epochs_to_load:
         ncRNA_probe = ncRNA_EMB_Classifier(input_size, args.hidden_size, output_size, device=device).to(device)
         print(ncRNA_probe)
-        optimizer = optim.Adam(ncRNA_probe.parameters(), lr=args.lr)
+        optimizer = optim.Adam(ncRNA_probe.parameters(), lr=args.lr, amsgrad=True)
 
         enc_epoch_weight_path = os.path.join(expr_investigate, 'model.epoch-%d' % enc_epoch_to_load)
         enc_epoch_dir = os.path.join(save_dir, 'enc-epoch-%d' % (enc_epoch_to_load))
 
         if preprocess_type == 'lstm':
-            pretrain_model = LSTMVAE(512, 128, 2, device=device,
-                                     use_attention=True).to(device)
+            pretrain_model = LSTMVAE(
+                512, 128, 2, device=device, use_attention=True,
+                use_flow_prior=True, use_aux_regressor=False).to(device)
         elif preprocess_type == 'graph_lstm':
-            pretrain_model = GraphLSTMVAE(512, 128, 10, device=device,
-                                          use_attention=False).to(device)
+            pretrain_model = GraphLSTMVAE(
+                512, 128, 10, device=device, use_attention=False,
+                use_flow_prior=True, use_aux_regressor=False).to(device)
         elif preprocess_type == 'jtvae':
-            pretrain_model = JunctionTreeVAE(256, 64, 10, 20, device=device).to(device)
+            pretrain_model = JunctionTreeVAE(
+                512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='baseline',
+                use_flow_prior=True, device=device).to(device)
 
         pretrain_model.load_state_dict(
             torch.load(enc_epoch_weight_path, map_location=device)['model_weights'])
@@ -135,13 +138,13 @@ if __name__ == "__main__":
         best_valid_weight_path = None
 
         print('converting embeddings')
-        train_emb = convert_seq_to_embeddings(train_seq, pretrain_model, mp_pool)
-        valid_emb = convert_seq_to_embeddings(valid_seq, pretrain_model, mp_pool)
+        train_emb = convert_seq_to_embeddings(train_seq, pretrain_model, mp_pool, preprocess_type=preprocess_type)
+        valid_emb = convert_seq_to_embeddings(valid_seq, pretrain_model, mp_pool, preprocess_type=preprocess_type)
 
         print('Probing', enc_epoch_weight_path)
         last_improved = 0
         for epoch in range(1, args.epoch + 1):
-            if last_improved >= 5:
+            if last_improved >= 10:
                 print('Have\'t improved for %d epochs' % (last_improved))
                 break
             # training loop
@@ -207,7 +210,7 @@ if __name__ == "__main__":
             print('Loading best weights from: %s' % (best_valid_weight_path))
             ncRNA_probe.load_state_dict(torch.load(best_valid_weight_path)['model_weights'])
 
-        test_emb = convert_seq_to_embeddings(test_seq, pretrain_model, mp_pool)
+        test_emb = convert_seq_to_embeddings(test_seq, pretrain_model, mp_pool, preprocess_type=preprocess_type)
         test_loss, test_acc, test_f1_macro, test_f1_micro, test_mcc = evaluate(test_emb, test_label)
 
         all_test_loss.append(test_loss)
@@ -220,36 +223,41 @@ if __name__ == "__main__":
 
     font = {'fontname': 'Times New Roman', 'size': 14}
     plt.clf()
-    plt.figure(figsize=(5., 5.))
-    plt.plot(all_test_loss)
+    ax = plt.figure(figsize=(5., 5.)).gca()
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    plt.plot(epochs_to_load, all_test_loss)
     plt.xlabel('epoch', **font)
     plt.ylabel('test_loss', **font)
     plt.savefig(os.path.join(save_dir, 'test_loss.png'), dpi=350)
 
     plt.clf()
-    plt.figure(figsize=(5., 5.))
-    plt.plot(all_test_acc)
+    ax = plt.figure(figsize=(5., 5.)).gca()
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    plt.plot(epochs_to_load, all_test_acc)
     plt.xlabel('epoch', **font)
     plt.ylabel('test_acc', **font)
     plt.savefig(os.path.join(save_dir, 'test_acc.png'), dpi=350)
 
     plt.clf()
-    plt.figure(figsize=(5., 5.))
-    plt.plot(all_test_f1_macro)
+    ax = plt.figure(figsize=(5., 5.)).gca()
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    plt.plot(epochs_to_load, all_test_f1_macro)
     plt.xlabel('epoch', **font)
     plt.ylabel('test_f1_macro', **font)
     plt.savefig(os.path.join(save_dir, 'test_f1_macro.png'), dpi=350)
 
     plt.clf()
-    plt.figure(figsize=(5., 5.))
-    plt.plot(all_test_f1_micro)
+    ax = plt.figure(figsize=(5., 5.)).gca()
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    plt.plot(epochs_to_load, all_test_f1_micro)
     plt.xlabel('epoch', **font)
     plt.ylabel('test_f1_micro', **font)
     plt.savefig(os.path.join(save_dir, 'test_f1_micro.png'), dpi=350)
 
     plt.clf()
-    plt.figure(figsize=(5., 5.))
-    plt.plot(all_test_mcc)
+    ax = plt.figure(figsize=(5., 5.)).gca()
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    plt.plot(epochs_to_load, all_test_mcc)
     plt.xlabel('epoch', **font)
     plt.ylabel('test_mcc', **font)
     plt.savefig(os.path.join(save_dir, 'test_mcc.png'), dpi=350)

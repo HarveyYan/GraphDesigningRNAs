@@ -95,16 +95,14 @@ if __name__ == "__main__":
                 epochs_to_load.append(int(dirname.split('-')[-1]))
         epochs_to_load = list(np.sort(epochs_to_load))
 
+    lib.plot_utils.set_output_dir(save_dir)
+    lib.plot_utils.suppress_stdout()
+    lib.plot_utils.set_first_tick(int(epochs_to_load[0]))
+
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-        lib.plot_utils.set_output_dir(save_dir)
-        lib.plot_utils.suppress_stdout()
-        lib.plot_utils.set_first_tick(int(epochs_to_load[0]))
         logger = lib.logger.CSVLogger('run.csv', save_dir, all_fields)
     else:
-        lib.plot_utils.set_output_dir(save_dir)
-        lib.plot_utils.suppress_stdout()
-
         # load existing results
         all_lines = []
         reader = csv.DictReader(open(os.path.join(save_dir, 'run.csv'), 'r'))

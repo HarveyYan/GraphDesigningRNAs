@@ -57,17 +57,25 @@ class RBPFolder:
 
         global model
         if model is None:
-            print('Data Utils Loading LSTM Baseline Model')
+            cpu_device = torch.device('cpu')
+            print('Data Utils Loading %s Model' % (self.preprocess_type))
             if self.preprocess_type == 'lstm':
-                model = LSTMVAE(512, 128, 2, device=torch.device('cpu'), use_attention=True).to(torch.device('cpu'))
+                model = LSTMVAE(
+                    512, 128, 2, device=cpu_device, use_attention=True,
+                    use_flow_prior=True, use_aux_regressor=False).to(cpu_device)
             elif self.preprocess_type == 'graph_lstm':
-                model = GraphLSTMVAE(512, 128, 10, device=torch.device('cpu'), use_attention=False).to(torch.device('cpu'))
+                model = GraphLSTMVAE(
+                    512, 128, 10, device=cpu_device, use_attention=False,
+                    use_flow_prior=True, use_aux_regressor=False).to(cpu_device)
             elif self.preprocess_type == 'jtvae':
-                model = JunctionTreeVAE(256, 64, 10, 20, device=torch.device('cpu')).to(torch.device('cpu'))
-            model.load_state_dict(
-                torch.load(self.weight_path)['model_weights'])
-        self.model = model
+                model = JunctionTreeVAE(
+                    512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='baseline',
+                    use_flow_prior=True, device=cpu_device).to(cpu_device)
 
+            model.load_state_dict(
+                torch.load(self.weight_path, map_location=cpu_device)['model_weights'])
+
+        self.model = model
 
     @staticmethod
     def lstm_joint_encoding_subroutine(np_seq):
