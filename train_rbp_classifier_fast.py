@@ -209,6 +209,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, all_test_loss)
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('test loss', **font)
     plt.savefig(os.path.join(save_dir, 'test_loss.png'), dpi=350)
 
@@ -217,6 +218,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, [test_roc_auc.mean() for test_roc_auc in all_test_roc])
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('averaged_test_roc_score', **font)
     plt.savefig(os.path.join(save_dir, 'averaged_test_roc_score.png'), dpi=350)
 
@@ -225,6 +227,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, [test_ap_score.mean() for test_ap_score in all_test_ap])
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('averaged_test_ap_score', **font)
     plt.savefig(os.path.join(save_dir, 'averaged_test_ap_score.png'), dpi=350)
 

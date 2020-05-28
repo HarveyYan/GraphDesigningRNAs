@@ -35,6 +35,7 @@ parser.add_argument('--print_iter', type=int, default=1000)
 parser.add_argument('--warmup_epoch', type=int, default=1)
 parser.add_argument('--use_flow_prior', type=eval, default=True, choices=[True, False])
 parser.add_argument('--limit_data', type=int, default=None)
+parser.add_argument('--resume', type=eval, default=False, choices=[True, False])
 
 if __name__ == "__main__":
 
@@ -94,7 +95,31 @@ if __name__ == "__main__":
 
     mp_pool = Pool(8)
 
-    for epoch in range(1, args.epoch + 1):
+    if args.resume:
+        '''load warm-up results'''
+        if args.use_flow_prior:
+            if args.limit_data is not None:
+                weight_path = '/home/zichao/scratch/JTRNA/graph-baseline-output/20200515-140602-512-128-5-maxpooled-hidden-states-mb-3e-3-sb-5e-4-amsgrad-limit-data-30/model.epoch-17'
+                epoch_to_start = 18
+                beta = 0.0012
+            else:
+                weight_path = '/home/zichao/scratch/JTRNA/graph-baseline-output/20200515-140604-512-128-5-maxpooled-hidden-states-mb-3e-3-sb-5e-4-amsgrad/model.epoch-11'
+                epoch_to_start = 12
+                beta = 0.0030
+        else:
+            raise ValueError('Cannot resume GraphLSTMVAE without flow prior')
+
+        all_weights = torch.load(weight_path)
+        model.load_state_dict(all_weights['model_weights'])
+        optimizer.load_state_dict(all_weights['opt_weights'])
+        print('Loaded weights:', weight_path)
+        print('Loaded beta:', beta)
+    else:
+        epoch_to_start = 1
+
+    lib.plot_utils.set_first_tick(epoch_to_start)
+
+    for epoch in range(epoch_to_start, args.epoch + 1):
 
         if epoch > args.warmup_epoch:
             beta = min(args.max_beta, beta + args.step_beta)

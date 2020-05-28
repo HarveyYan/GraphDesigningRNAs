@@ -121,9 +121,9 @@ if __name__ == "__main__":
                 epoch_to_start = 18
                 beta = 0.0012
             else:
-                weight_path = '/home/zichao/scratch/JTRNA/output/20200514-162434-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4/model.epoch-7'
-                epoch_to_start = 8
-                beta = 0.001
+                weight_path = '/home/zichao/scratch/JTRNA/output/20200514-162434-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4/model.epoch-1'
+                epoch_to_start = 2
+                beta = 0.0000
         else:
             weight_path = '/home/zichao/scratch/JTRNA/output/20200514-163629-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4-no-flow-prior/model.epoch-8'
             epoch_to_start = 9
@@ -327,8 +327,8 @@ if __name__ == "__main__":
 
             ######################## evaluate prior with regularity constraints ########################
             ret = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool, enforce_rna_prior=True)
-            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(ret['prior_valid']) / 100,
-                                index=1)  # /10000 * 100 = /100
+            lib.plot_utils.plot('Prior_valid_with_reg', np.sum(ret['prior_valid']) / 10,
+                                index=1)  # /1000 * 100 = /10
             lib.plot_utils.plot('Prior_fe_deviation_with_reg',
                                 np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
             lib.plot_utils.plot('Prior_fe_deviation_len_normed_with_reg',
@@ -336,7 +336,7 @@ if __name__ == "__main__":
 
             ######################## evaluate prior without regularity constraints ########################
             ret = evaluate_prior(sampled_g_z, sampled_t_z, 1000, 1, mp_pool, enforce_rna_prior=False)
-            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(ret['prior_valid']) / 100, index=1)  # /10000 * 100 = /100
+            lib.plot_utils.plot('Prior_valid_no_reg', np.sum(ret['prior_valid']) / 10, index=1)  # /1000 * 100 = /10
             lib.plot_utils.plot('Prior_fe_deviation_no_reg',
                                 np.sum(ret['prior_fe_deviation']) / np.sum(ret['prior_valid']), index=1)
             lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg',

@@ -100,19 +100,26 @@ if __name__ == "__main__":
     if args.resume:
         '''load warm-up results'''
         if args.use_flow_prior:
-            if args.use_attention:
-                weight_path = '/home/zichao/lstm_baseline_output/20200423-234937-cnf-flow-prior-maxpool-annealling/model.epoch-11'
+            if args.limit_data is not None:
+                weight_path = '/home/zichao/scratch/JTRNA/lstm-baseline-output/20200515-130352-512-128-2-maxpooled-hidden-states-mb-3e-3-sb-5e-4-amsgrad-data-600000/model.epoch-23'
+                epoch_to_start = 24
+                beta = 0.0030
             else:
-                weight_path = '/home/zichao/lstm_baseline_output/20200427-175431-cnf-flow-prior-no-att-aggr-anneal/model.epoch-5'
+                weight_path = '/home/zichao/scratch/JTRNA/lstm-baseline-output/20200515-094519-512-128-2-maxpooled-hidden-states-mb-3e-3-sb-5e-4-amsgrad/model.epoch-11'
+                epoch_to_start = 12
+                beta = 0.0030
         else:
-            weight_path = '/home/zichao/lstm_baseline_output/20200427-204831-no-flow-prior-aggr-anneal/model.epoch-5'
+            raise ValueError('Cannot resume LSTMVAE without flow prior')
+
         all_weights = torch.load(weight_path)
         model.load_state_dict(all_weights['model_weights'])
         optimizer.load_state_dict(all_weights['opt_weights'])
-        print('Weights loaded from', weight_path)
-        epoch_to_start = 12
+        print('Loaded weights:', weight_path)
+        print('Loaded beta:', beta)
     else:
         epoch_to_start = 1
+
+    lib.plot_utils.set_first_tick(epoch_to_start)
 
     for epoch in range(epoch_to_start, args.epoch + 1):
 

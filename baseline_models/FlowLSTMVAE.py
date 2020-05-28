@@ -396,17 +396,17 @@ class LSTMVAE(nn.Module):
         if self.use_flow_prior:
             self.flow_args = {
                 'latent_dims': "256-256",
-                'latent_num_blocks': 1,
+                'latent_num_blocks': 2,
                 'zdim': latent_size,
                 'layer_type': 'concatsquash',
                 'nonlinearity': 'tanh',
                 'time_length': 0.5,
-                'train_T': True,
+                'train_T': False,
                 'solver': 'dopri5',
                 'use_adjoint': True,
                 'atol': 1e-5,
                 'rtol': 1e-5,
-                'batch_norm': False,
+                'batch_norm': True,
                 'bn_lag': 0,
                 'sync_bn': False,
                 'device': self.device

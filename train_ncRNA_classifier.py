@@ -227,6 +227,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, all_test_loss)
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('test_loss', **font)
     plt.savefig(os.path.join(save_dir, 'test_loss.png'), dpi=350)
 
@@ -235,6 +236,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, all_test_acc)
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('test_acc', **font)
     plt.savefig(os.path.join(save_dir, 'test_acc.png'), dpi=350)
 
@@ -243,6 +245,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, all_test_f1_macro)
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('test_f1_macro', **font)
     plt.savefig(os.path.join(save_dir, 'test_f1_macro.png'), dpi=350)
 
@@ -251,6 +254,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, all_test_f1_micro)
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('test_f1_micro', **font)
     plt.savefig(os.path.join(save_dir, 'test_f1_micro.png'), dpi=350)
 
@@ -259,6 +263,7 @@ if __name__ == "__main__":
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.plot(epochs_to_load, all_test_mcc)
     plt.xlabel('epoch', **font)
+    ax.set_xlim(xmin=epochs_to_load[0])
     plt.ylabel('test_mcc', **font)
     plt.savefig(os.path.join(save_dir, 'test_mcc.png'), dpi=350)
 
