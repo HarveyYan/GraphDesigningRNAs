@@ -6,7 +6,8 @@ import copy
 from jtvae_models.GraphEncoder import GraphEncoder
 from jtvae_models.TreeEncoder import TreeEncoder
 from jtvae_models.ParallelAltDecoder import UnifiedDecoder
-from jtvae_models.OrderedTreeEncoder import OrderedTreeEncoder
+from jtvae_models.ParallelAltDecoderV1 import UnifiedDecoder as UnifiedDecoderV1
+from jtvae_models.BranchedTreeEncoder import BranchedTreeEncoder
 
 from cnf_models.flow import get_latent_cnf
 from lib.nn_utils import log_sum_exp
@@ -22,9 +23,10 @@ class JunctionTreeVAE(nn.Module):
         self.depthG = depthG
         self.depthT = depthT
         self.tree_encoder_arch = kwargs.get('tree_encoder_arch', 'baseline')
-        assert self.tree_encoder_arch in ['baseline', 'ordnuc'], 'selected tree encoder arch \'%s\' is not unknown' % (
+        assert self.tree_encoder_arch in ['baseline', 'branched'], 'selected tree encoder arch \'%s\' is not unknown' % (
             self.tree_encoder_arch)
         self.use_flow_prior = kwargs.get('use_flow_prior', True)
+        self.decoder_version = kwargs.get('decoder_version', 'default')
 
         self.g_encoder = GraphEncoder(self.hidden_dim, self.depthG, **kwargs)
         self.g_mean = nn.Linear(hidden_dim, latent_dim)
@@ -32,12 +34,16 @@ class JunctionTreeVAE(nn.Module):
 
         if self.tree_encoder_arch == 'baseline':  # unordered segment, baseline
             self.t_encoder = TreeEncoder(self.hidden_dim, self.depthT, **kwargs)
-        elif self.tree_encoder_arch == 'ordnuc':
-            self.t_encoder = OrderedTreeEncoder(self.hidden_dim, self.depthT, **kwargs)
+        elif self.tree_encoder_arch == 'branched':
+            self.t_encoder = BranchedTreeEncoder(self.hidden_dim, self.depthT, **kwargs)
         self.t_mean = nn.Linear(hidden_dim, latent_dim)
         self.t_var = nn.Linear(hidden_dim, latent_dim)
 
-        self.decoder = UnifiedDecoder(hidden_dim, latent_dim, **kwargs)
+        if self.decoder_version == 'default':
+            self.decoder = UnifiedDecoder(hidden_dim, latent_dim, **kwargs)
+        else:
+            print('Using V1 decoder!')
+            self.decoder = UnifiedDecoderV1(hidden_dim, latent_dim, **kwargs)
 
         if self.use_flow_prior:
             self.flow_args = {

@@ -474,6 +474,9 @@ if __name__ == "__main__":
     # rna_struct = "(((...)))..."
 
     tree = RNAJunctionTree(rna_seq, rna_struct)
+    stack = []
+    dfs(stack, tree.nodes[1], 0)
+    print([(tuple[0].idx, tuple[1].idx, tuple[2]) for tuple in stack])
     print([node.hpn_label for node in tree.nodes[2].neighbors])
     exit()
 

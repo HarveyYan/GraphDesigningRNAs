@@ -11,7 +11,7 @@ sys.path.append(basedir)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from jtvae_models.TreeEncoder import TreeEncoder
-from jtvae_models.OrderedTreeEncoder import OrderedTreeEncoder
+from jtvae_models.BranchedTreeEncoder import BranchedTreeEncoder
 from jtvae_models.GraphEncoder import GraphEncoder
 
 
@@ -68,8 +68,8 @@ class JunctionTreeDataset(Dataset):
     def __getitem__(self, idx):
         if self.tree_encoder_arch == 'baseline':
             return tensorize(self.data[idx], TreeEncoder)
-        elif self.tree_encoder_arch == 'ordnuc':
-            return tensorize(self.data[idx], OrderedTreeEncoder)
+        elif self.tree_encoder_arch == 'branched':
+            return tensorize(self.data[idx], BranchedTreeEncoder)
         else:
             raise ValueError('Unknown %s tree encoder architecture' % (self.tree_encoder_arch))
 

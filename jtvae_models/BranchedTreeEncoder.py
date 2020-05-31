@@ -6,26 +6,30 @@ import numpy as np
 import scipy.sparse as sp
 import networkx as nx
 from lib.nn_utils import index_select_ND
-from lib.tree_decomp import get_tree_height
+from lib.tree_decomp import dfs
 
 HYPERGRAPH_VOCAB = ['H', 'I', 'M', 'S']
 # there ain't no F/T anymore
 # there is no need to encode/decode the pseudo start node
 HPN_FDIM = len(['H', 'I', 'M', 'S'])
 
+NUC_VOCAB = ['A', 'C', 'G', 'U']
+NUC_FDIM = len(NUC_VOCAB)
 
-class OrderedTreeEncoder(nn.Module):
+
+class BranchedTreeEncoder(nn.Module):
 
     def __init__(self, hidden_size, depth, **kwargs):
-        super(OrderedTreeEncoder, self).__init__()
+        super(BranchedTreeEncoder, self).__init__()
         self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
         self.hidden_size = hidden_size
         self.depth = depth
         self.output_w = nn.Linear(HPN_FDIM + hidden_size * 2, hidden_size)
         self.GRU = GraphGRU(HPN_FDIM + hidden_size, hidden_size, depth=depth, **kwargs)
 
-        self.jt_order_lstm = torch.nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
         # bidirectional hence hidden_size//2
+        # scan the tree nodes in the order it will be traversed later in decoding
+        self.jt_order_lstm = torch.nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
 
     def send_to_device(self, *args):
         ret = []
@@ -34,21 +38,21 @@ class OrderedTreeEncoder(nn.Module):
         return ret
 
     def forward(self, nuc_embedding, f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope,
-                diameter):
+                all_dfs_idx):
 
         f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
             self.send_to_device(f_node_label, f_node_assignment, f_message, node_graph, message_graph)
-        max_diameter = max(diameter)
+
         nuc_emb = torch.cat([nuc_embedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
-        f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).max(dim=1)  # [nb_segments, hidden_size]
+        f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).max(dim=1)[0]  # [nb_nodes, hidden_size]
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
         ''' begin tree messages iteration'''
         messages = torch.zeros(message_graph.size(0), self.hidden_size).to(self.device)
         f_message = index_select_ND(
             torch.cat([f_node, torch.zeros(1, HPN_FDIM + self.hidden_size).to(self.device)], dim=0),
-            0, f_message)  # [nb_msg, nb_neighbors, hidden_size]
-        messages = self.GRU(messages, f_message, message_graph, max_diameter)  # bottom-up and top-down phases
+            0, f_message).sum(dim=1)  # [nb_msg, hidden_size]
+        messages = self.GRU(messages, f_message, message_graph)  # bottom-up and top-down phases
 
         incoming_msg = index_select_ND(messages, 0, node_graph).sum(1)
         f_node = index_select_ND(f_node, 0, node_graph).sum(1)
@@ -56,57 +60,58 @@ class OrderedTreeEncoder(nn.Module):
 
         ''' bilstm to add order information into the learnt node embeddings '''
         '''depth first ordering of the nodes'''
-        all_len = list(np.array(scope)[:, 1])
-        batch_size = len(scope)
+        all_len = list([len(trace) for trace in all_dfs_idx])
+        max_len = max(all_len)
+        batch_size = len(all_dfs_idx)
+        all_pre_padding_idx = np.concatenate(
+            [np.array(list(range(length))) + i * max_len for i, length in enumerate(all_len)]).astype(np.long)
 
         batch_jt_vec = []
-        for start_idx, length in scope:
-            batch_jt_vec.append(hpn_embedding[start_idx: start_idx + length])
+        for dfs_idx in all_dfs_idx:
+            batch_jt_vec.append(hpn_embedding[torch.as_tensor(dfs_idx).to(self.device)])  # skip the pseudo node
 
         # [batch_size, max_len, hidden_size]
         padded_jt_vec = nn.utils.rnn.pad_sequence(batch_jt_vec, batch_first=True)
         packed_jt_vec = nn.utils.rnn.pack_padded_sequence(
             padded_jt_vec, all_len, enforce_sorted=False, batch_first=True)
 
-        output, (hn, cn) = self.jt_order_lstm(packed_jt_vec)
+        output, _ = self.jt_order_lstm(packed_jt_vec)
+        output = nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[0]
 
-        # padded_jt_emb = nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[0]
-        # batch_size x max_len x hidden_dim
+        output = output.reshape(batch_size * max_len, self.hidden_size). \
+            index_select(0, torch.as_tensor(all_pre_padding_idx).to(self.device))
 
-        tree_vec = hn.transpose(0, 1).reshape(batch_size, self.hidden_size)
+        representation = []
+        start = 0
+        for length in all_len:
+            representation.append(torch.max(output[start: start + length], dim=0)[0])
+            start += length
 
-        return messages, tree_vec
-
-        # batch_hpn_vec = []
-        # for start_idx, length in scope:
-        #     # skip the first pseudo node (P) as it is merely a placeholder
-        #     # only the root vector is kept
-        #     batch_hpn_vec.append(hpn_embedding[start_idx + 1])
-        #
-        #     # batch_hpn_vec.append(torch.sum(hpn_embedding[start_idx: start_idx+length], dim=0))
-        #     # todo, does including other nodes really confuse the decoding stage?
-        #
-        # return messages, torch.stack(batch_hpn_vec)
+        return torch.stack(representation, dim=0)
 
     @staticmethod
     def prepare_batch_data(rna_tree_batch):
         scope = []
-        diameter = []
+        all_dfs_idx = []
 
         messages, message_dict = [None], {}
         f_node_label = []
         f_node_assignment = []
         all_nb_branches = []
-        all_depth_first_ordering = []
+
         tree_node_offset = 0
         graph_nuc_offset = 0
 
         for tree in rna_tree_batch:
-            # graph diameter
-            diameter.append(nx.diameter(nx.from_scipy_sparse_matrix(tree.hp_adjmat)))
-            depth_first_order = sp.csgraph.depth_first_order(
-                tree.hp_adjmat, i_start=0, directed=False, return_predecessors=False)
-            all_depth_first_ordering.extend(np.array(depth_first_order) + tree_node_offset)
+
+            s = []
+            dfs(s, tree.nodes[1], 0)
+            all_traces = [tup[0].idx + tree_node_offset for tup in s]
+            if len(all_traces) > 0:
+                all_dfs_idx.append(all_traces)
+            else:
+                all_dfs_idx.append([1 + tree_node_offset])  # blunder solved here!
+
             for node in np.array(tree.nodes):
                 onehot_enc = np.array(list(map(lambda x: x == node.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
 
@@ -139,26 +144,51 @@ class OrderedTreeEncoder(nn.Module):
         total_nucleotides = graph_nuc_offset
         total_nodes = tree_node_offset
         total_messages = len(messages)
-        node_graph = [[] for i in range(total_nodes)]
-        message_graph = [[] for i in range(total_messages)]
-        f_message = [sum(all_nb_branches)] * total_messages
+        node_graph = [[] for _ in range(total_nodes)]
+        message_graph = [[] for _ in range(total_messages)]
+        f_message = [[] for _ in range(total_messages)]
 
         for node_from, node_to, nb_idx, tree_node_offset in messages[1:]:
+
+            if node_from.idx < node_to.idx:
+                is_backtrack = False
+            else:
+                is_backtrack = True
+
             # nb_idx is the index of node_to in the neighborhood of node_from
             msg_idx = message_dict[(node_from.idx + tree_node_offset, node_to.idx + tree_node_offset)]
 
-            f_message[msg_idx] = sum(all_nb_branches[:node_from.idx + tree_node_offset]) + nb_idx
+            branch_offset = sum(all_nb_branches[:node_from.idx + tree_node_offset])
+            # todo, nb_idx is no longer quite useful as the parent node may appear the first in the neighbors list
+            if is_backtrack:
+                f_message[msg_idx] = list(np.array(range(len(node_from.neighbors))) + branch_offset)
+            else:
+                all_nb_idx = [node.idx for node in node_from.neighbors]
+
+                if node_from.hpn_label != 'P':
+                    # remove the parent node index
+                    # and determine node_to's position relative to its sibling
+                    par_idx = min(all_nb_idx)
+                    all_nb_idx.remove(par_idx)
+
+                node_to_nb_idx = all_nb_idx.index(node_to.idx)
+                f_message[msg_idx] = list(np.array(range(node_to_nb_idx + 1)) + branch_offset)
             # message passed from node_from to node_to
             node_graph[node_to.idx + tree_node_offset].append(msg_idx)
+
+            if node_to.hpn_label == 'P':
+                continue
+
             for neighbor_node in node_to.neighbors:
-                if (
-                        neighbor_node.idx == node_from.idx and node_to.hpn_label != 'H') or neighbor_node.idx < node_from.idx:
+                # neighbor_node.idx != min([node.idx for node in node_to.neighbors])
+                # detects if neighbor_node is the parent node of node_to
+                if is_backtrack and neighbor_node.idx <= node_from.idx and neighbor_node.idx != min([node.idx for node in node_to.neighbors]):
                     continue
-                else:
-                    necessary_msg_idx = message_dict[
-                        (node_to.idx + tree_node_offset, neighbor_node.idx + tree_node_offset)]
-                    # that the computation of this message depends on the message from (node_from, node_to)
-                    message_graph[necessary_msg_idx].append(msg_idx)
+
+                necessary_msg_idx = message_dict[
+                    (node_to.idx + tree_node_offset, neighbor_node.idx + tree_node_offset)]
+                # that the computation of this message depends on the message from (node_from, node_to)
+                message_graph[necessary_msg_idx].append(msg_idx)
 
         max_len = max([len(t) for t in node_graph] + [1])
         # 1 is for the special case where we have only one clique
@@ -173,14 +203,18 @@ class OrderedTreeEncoder(nn.Module):
         for t in f_node_assignment:
             t.extend([total_nucleotides] * (max_len - len(t)))
 
-        node_graph = torch.as_tensor(np.array(node_graph, dtype=np.long)[all_depth_first_ordering])
+        max_len = max([len(t) for t in f_message])
+        for t in f_message:
+            t.extend([sum(all_nb_branches)] * (max_len - len(t)))
+
+        node_graph = torch.as_tensor(np.array(node_graph, dtype=np.long))
         message_graph = torch.as_tensor(np.array(message_graph, dtype=np.long))
         f_node_label = torch.stack(f_node_label)
         f_node_assignment = torch.as_tensor(np.array(f_node_assignment, dtype=np.long))
         f_message = torch.as_tensor(np.array(f_message, dtype=np.long))
 
         # cannot pass large list to pytorch dataloader in multiprocessing setting
-        return f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, diameter
+        return f_node_label, f_node_assignment, f_message, node_graph, message_graph, scope, all_dfs_idx
 
 
 class GraphGRU(nn.Module):

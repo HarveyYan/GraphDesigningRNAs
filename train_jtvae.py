@@ -39,6 +39,7 @@ parser.add_argument('--epoch', type=int, default=10)
 # parser.add_argument('--anneal_rate', type=float, default=0.9)
 parser.add_argument('--print_iter', type=int, default=1000)
 parser.add_argument('--tree_encoder_arch', type=str, default='baseline')
+parser.add_argument('--decoder_version', type=str, default='default')
 parser.add_argument('--warmup_epoch', type=int, default=1)
 parser.add_argument('--use_flow_prior', type=eval, default=True, choices=[True, False])
 parser.add_argument('--limit_data', type=int, default=None)
@@ -53,7 +54,7 @@ if __name__ == "__main__":
 
     model = JunctionTreeVAE(args.hidden_size, args.latent_size, args.depthT, args.depthG,
                             decode_nuc_with_lstm=True, device=device, tree_encoder_arch=args.tree_encoder_arch,
-                            use_flow_prior=args.use_flow_prior).to(device)
+                            use_flow_prior=args.use_flow_prior, decoder_version=args.decoder_version).to(device)
     print(model)
     for param in model.parameters():
         if param.dim() == 1:
@@ -145,7 +146,7 @@ if __name__ == "__main__":
             beta = min(args.max_beta, beta + args.step_beta)
 
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
-                                    num_workers=8, tree_encoder_arch=args.tree_encoder_arch,
+                                    num_workers=0, tree_encoder_arch=args.tree_encoder_arch,
                                     limit_data=args.limit_data)
         for batch in loader:
             total_step += 1
