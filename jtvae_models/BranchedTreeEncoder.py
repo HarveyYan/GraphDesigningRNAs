@@ -43,7 +43,7 @@ class BranchedTreeEncoder(nn.Module):
         f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
             self.send_to_device(f_node_label, f_node_assignment, f_message, node_graph, message_graph)
 
-        nuc_emb = torch.cat([nuc_embedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
+        nuc_emb = torch.cat([nuc_embedding, torch.ones(1, self.hidden_size).to(self.device) * -99999], dim=0)
         f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).max(dim=1)[0]  # [nb_nodes, hidden_size]
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 

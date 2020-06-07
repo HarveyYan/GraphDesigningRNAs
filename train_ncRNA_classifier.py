@@ -58,14 +58,26 @@ if __name__ == "__main__":
     print(args)
 
     preprocess_type = args.mode
+    input_size = 128  # latent dimension
+    output_size = len(all_classes)
+    train_val_split_ratio = 0.1
 
     train_seq, train_label = read_fasta(train_datapath)
     test_seq, test_label = read_fasta(test_datapath)
+    train_label = np.array(train_label)
     test_label = np.array(test_label)
 
-    all_idx = np.random.permutation(len(train_seq))
-    train_idx = all_idx[:int(len(train_seq) * 0.9)]
-    valid_idx = all_idx[int(len(train_seq) * 0.9):]
+    valid_idx = []
+    for label in range(output_size):
+        label_idx = np.where(train_label == label)[0]
+        nb_label = len(label_idx)
+        valid_idx.extend(np.random.choice(label_idx, int(nb_label * train_val_split_ratio), replace=False))
+    valid_idx = np.array(valid_idx)
+    train_idx = np.setdiff1d(np.arange(len(train_label)), valid_idx)
+
+    # all_idx = np.random.permutation(len(train_seq))
+    # train_idx = all_idx[:int(len(train_seq) * 0.9)]
+    # valid_idx = all_idx[int(len(train_seq) * 0.9):]
 
     valid_seq = np.array(train_seq)[valid_idx]
     valid_label = np.array(train_label)[valid_idx]
@@ -82,9 +94,6 @@ if __name__ == "__main__":
         if dirname.startswith('model'):
             epochs_to_load.append(int(dirname.split('-')[-1]))
     epochs_to_load = list(np.sort(epochs_to_load))
-
-    input_size = 128  # latent dimension
-    output_size = len(all_classes)
 
     save_dir = os.path.join(args.expr_path, 'ncRNA-classification-%s' % (args.save_dir))
     if not os.path.exists(save_dir):
@@ -144,7 +153,7 @@ if __name__ == "__main__":
         print('Probing', enc_epoch_weight_path)
         last_improved = 0
         for epoch in range(1, args.epoch + 1):
-            if last_improved >= 10:
+            if last_improved >= 20:
                 print('Have\'t improved for %d epochs' % (last_improved))
                 break
             # training loop

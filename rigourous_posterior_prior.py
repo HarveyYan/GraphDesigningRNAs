@@ -116,12 +116,12 @@ if __name__ == "__main__":
                     new_line[key] = int(line[key])
                     continue
                 new_line[key] = float(line[key])
-                lib.plot_utils.plot(key, float(line[key]))
+                lib.plot_utils.plot(key, float(line[key]), index=1)
             all_lines.append(new_line)
 
-            lib.plot_utils.set_xlabel_for_tick(index=0, label='epoch')
+            lib.plot_utils.set_xlabel_for_tick(index=1, label='epoch')
             lib.plot_utils.flush()
-            lib.plot_utils.tick(index=0)
+            lib.plot_utils.tick(index=1)
 
         logger = lib.logger.CSVLogger('run.csv', save_dir, all_fields)
         for row in all_lines:
@@ -285,27 +285,27 @@ if __name__ == "__main__":
             # bar.refresh()
 
             # posterior decoding with enforced RNA regularity
-            lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100)
-            lib.plot_utils.plot('Validation_post_valid_with_reg', post_valid / total * 100)
-            lib.plot_utils.plot('Validation_post_fe_deviation_with_reg', post_fe_deviation / post_valid)
+            lib.plot_utils.plot('Validation_recon_acc_with_reg', recon_acc / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_valid_with_reg', post_valid / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_with_reg', post_fe_deviation / post_valid, index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_with_reg',
-                                post_fe_deviation_len_normed / post_valid)
+                                post_fe_deviation_len_normed / post_valid, index=1)
 
             # posterior decoding without RNA regularity
-            lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100)
-            lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100)
-            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg)
+            lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg, index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg',
-                                post_fe_deviation_noreg_len_normed / post_valid_noreg)
+                                post_fe_deviation_noreg_len_normed / post_valid_noreg, index=1)
 
             # posterior decoding without RNA regularity and deterministic
             lib.plot_utils.plot('Validation_recon_acc_no_reg_greedy',
-                                recon_acc_noreg_det / total * nb_decode * 100)  # only decoded once
-            lib.plot_utils.plot('Validation_post_valid_no_reg_greedy', post_valid_noreg_det / total * nb_decode * 100)
+                                recon_acc_noreg_det / total * nb_decode * 100, index=1)  # only decoded once
+            lib.plot_utils.plot('Validation_post_valid_no_reg_greedy', post_valid_noreg_det / total * nb_decode * 100, index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_no_reg_greedy',
-                                post_fe_deviation_noreg_det / post_valid_noreg_det)
+                                post_fe_deviation_noreg_det / post_valid_noreg_det, index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg_greedy',
-                                post_fe_deviation_noreg_det_len_normed / post_valid_noreg_det)
+                                post_fe_deviation_noreg_det_len_normed / post_valid_noreg_det, index=1)
 
             prior_valid_reg_sto, prior_fe_deviation_reg_sto, prior_fe_deviation_reg_sto_len_normed = 0., 0., 0.
             prior_valid_noreg_sto, prior_fe_deviation_noreg_sto, prior_fe_deviation_noreg_sto_len_normed = 0., 0., 0.
@@ -413,32 +413,32 @@ if __name__ == "__main__":
             prior_fe_deviation_noreg_det += np.sum(ret_dict['prior_fe_deviation'])
             prior_fe_deviation_noreg_det_len_normed += np.sum(ret_dict['prior_fe_deviation_len_normed'])
 
-            lib.plot_utils.plot('Prior_valid_with_reg', prior_valid_reg_sto / 1000)
-            lib.plot_utils.plot('Prior_fe_deviation_with_reg', prior_fe_deviation_reg_sto / prior_valid_reg_sto)
+            lib.plot_utils.plot('Prior_valid_with_reg', prior_valid_reg_sto / 1000, index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_with_reg', prior_fe_deviation_reg_sto / prior_valid_reg_sto, index=1)
             lib.plot_utils.plot('Prior_fe_deviation_len_normed_with_reg',
-                                prior_fe_deviation_reg_sto_len_normed / prior_valid_reg_sto)
+                                prior_fe_deviation_reg_sto_len_normed / prior_valid_reg_sto, index=1)
 
-            lib.plot_utils.plot('Prior_valid_no_reg', prior_valid_noreg_sto / 1000)
-            lib.plot_utils.plot('Prior_fe_deviation_no_reg', prior_fe_deviation_noreg_sto / prior_valid_noreg_sto)
+            lib.plot_utils.plot('Prior_valid_no_reg', prior_valid_noreg_sto / 1000, index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg', prior_fe_deviation_noreg_sto / prior_valid_noreg_sto, index=1)
             lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg',
-                                prior_fe_deviation_noreg_sto_len_normed / prior_valid_noreg_sto)
+                                prior_fe_deviation_noreg_sto_len_normed / prior_valid_noreg_sto, index=1)
 
-            lib.plot_utils.plot('Prior_valid_no_reg_greedy', prior_valid_noreg_det / 100)
+            lib.plot_utils.plot('Prior_valid_no_reg_greedy', prior_valid_noreg_det / 100, index=1)
             lib.plot_utils.plot('Prior_fe_deviation_no_reg_greedy',
-                                prior_fe_deviation_noreg_det / prior_valid_noreg_det)
+                                prior_fe_deviation_noreg_det / prior_valid_noreg_det, index=1)
             lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg_greedy',
-                                prior_fe_deviation_noreg_det_len_normed / prior_valid_noreg_det)
+                                prior_fe_deviation_noreg_det_len_normed / prior_valid_noreg_det, index=1)
             lib.plot_utils.plot('Prior_uniqueness_no_reg_greedy',
-                                prior_uniqueness_noreg_det / prior_valid_noreg_det * 100)
+                                prior_uniqueness_noreg_det / prior_valid_noreg_det * 100, index=1)
 
             tocsv = {'Epoch': enc_epoch_to_load}
             for name, val in lib.plot_utils._since_last_flush.items():
                 tocsv[name] = list(val.values())[0]
             logger.update_with_dict(tocsv)
 
-            lib.plot_utils.set_xlabel_for_tick(index=0, label='epoch')
+            lib.plot_utils.set_xlabel_for_tick(index=1, label='epoch')
             lib.plot_utils.flush()
-            lib.plot_utils.tick(index=0)
+            lib.plot_utils.tick(index=1)
 
     if mp_pool is not None:
         mp_pool.close()

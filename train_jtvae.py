@@ -122,9 +122,14 @@ if __name__ == "__main__":
                 epoch_to_start = 18
                 beta = 0.0012
             else:
-                weight_path = '/home/zichao/scratch/JTRNA/output/20200514-162434-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4/model.epoch-1'
-                epoch_to_start = 2
-                beta = 0.0000
+                if args.tree_encoder_arch == 'baseline':
+                    weight_path = '/home/zichao/scratch/JTRNA/output/20200523-052733-resumed-alt-mb-3e-3-[20200514-162434-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4]/model.epoch-12'
+                    epoch_to_start = 13
+                    beta = 0.0030
+                else:
+                    weight_path = '/home/zichao/scratch/JTRNA/output/20200530-220446-branched-treedec-mb-2e-3-sb-5e-4/model.epoch-2'
+                    epoch_to_start = 3
+                    beta = 0.0000
         else:
             weight_path = '/home/zichao/scratch/JTRNA/output/20200514-163629-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4-no-flow-prior/model.epoch-8'
             epoch_to_start = 9
@@ -146,7 +151,7 @@ if __name__ == "__main__":
             beta = min(args.max_beta, beta + args.step_beta)
 
         loader = JunctionTreeFolder('data/rna_jt_32-512/train-split', args.batch_size,
-                                    num_workers=0, tree_encoder_arch=args.tree_encoder_arch,
+                                    num_workers=8, tree_encoder_arch=args.tree_encoder_arch,
                                     limit_data=args.limit_data)
         for batch in loader:
             total_step += 1

@@ -40,7 +40,7 @@ class TreeEncoder(nn.Module):
         f_node_label, f_node_assignment, f_message, node_graph, message_graph = \
             self.send_to_device(f_node_label, f_node_assignment, f_message, node_graph, message_graph)
         # max_diameter = max(diameter)
-        nuc_emb = torch.cat([nuc_embedding, torch.zeros(1, self.hidden_size).to(self.device)], dim=0)
+        nuc_emb = torch.cat([nuc_embedding, torch.ones(1, self.hidden_size).to(self.device) * -99999], dim=0)
         f_node_assignment = index_select_ND(nuc_emb, 0, f_node_assignment).max(dim=1)[0]  # [nb_nodes, hidden_size]
         f_node = torch.cat([f_node_label, f_node_assignment], dim=1)
 
@@ -108,7 +108,7 @@ class TreeEncoder(nn.Module):
             if len(all_traces) > 0:
                 all_dfs_idx.append(all_traces)
             else:
-                all_dfs_idx.append([1])
+                all_dfs_idx.append([1 + tree_node_offset])  # blunder solved here!
             for node in np.array(tree.nodes):
                 onehot_enc = np.array(list(map(lambda x: x == node.hpn_label, HYPERGRAPH_VOCAB)), dtype=np.float32)
                 f_node_label.append(torch.as_tensor(onehot_enc))
