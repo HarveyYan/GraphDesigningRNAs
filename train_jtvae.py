@@ -17,6 +17,7 @@ from lib.data_utils import JunctionTreeFolder
 import jtvae_models.GraphEncoder
 import jtvae_models.TreeEncoder
 import jtvae_models.ParallelAltDecoder
+import jtvae_models.ParallelAltDecoderV1
 import lib.plot_utils, lib.logger
 import jtvae_models.jtvae_utils
 from jtvae_models.jtvae_utils import *
@@ -90,6 +91,7 @@ if __name__ == "__main__":
     shutil.copy(inspect.getfile(jtvae_models.GraphEncoder), backup_dir)
     shutil.copy(inspect.getfile(jtvae_models.TreeEncoder), backup_dir)
     shutil.copy(inspect.getfile(jtvae_models.ParallelAltDecoder), backup_dir)
+    shutil.copy(inspect.getfile(jtvae_models.ParallelAltDecoderV1), backup_dir)
 
     lib.plot_utils.set_output_dir(save_dir)
     lib.plot_utils.suppress_stdout()
@@ -123,13 +125,13 @@ if __name__ == "__main__":
                 beta = 0.0012
             else:
                 if args.tree_encoder_arch == 'baseline':
-                    weight_path = '/home/zichao/scratch/JTRNA/output/20200523-052733-resumed-alt-mb-3e-3-[20200514-162434-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4]/model.epoch-12'
-                    epoch_to_start = 13
-                    beta = 0.0030
-                else:
-                    weight_path = '/home/zichao/scratch/JTRNA/output/20200530-220446-branched-treedec-mb-2e-3-sb-5e-4/model.epoch-2'
-                    epoch_to_start = 3
+                    weight_path = '/home/zichao/scratch/JTRNA/output/corrected-treeenc-jtvae/20200606-234107-corrected-treeencoder-mb-2e-3-sb-5e-4/model.epoch-4'
+                    epoch_to_start = 5
                     beta = 0.0000
+                else:
+                    weight_path = '/home/zichao/scratch/JTRNA/output/branched-treeenc-corrected/20200606-200347-branched-treedec-corrected-mb-2e-3-sb-5e-4/model.epoch-6'
+                    epoch_to_start = 7
+                    beta = 0.0005
         else:
             weight_path = '/home/zichao/scratch/JTRNA/output/20200514-163629-512-64-5-10-amsgrad-stability-mb-2e-3-sb-5e-4-no-flow-prior/model.epoch-8'
             epoch_to_start = 9

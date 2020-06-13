@@ -22,7 +22,7 @@ parser.add_argument('--hidden_size', type=eval, default=256)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--expr_path', type=str, default='')
 parser.add_argument('--mode', type=str, default='lstm')
-parser.add_argument('--lr', type=float, default=1e-3)
+parser.add_argument('--lr', type=float, default=4e-4)
 parser.add_argument('--epoch', type=int, default=100)
 
 
@@ -102,12 +102,12 @@ if __name__ == "__main__":
     all_test_loss, all_test_acc, all_test_f1_macro, all_test_f1_micro, all_test_mcc = \
         [], [], [], [], []
 
-    mp_pool = Pool(8)
+    mp_pool = None # Pool(10)
 
     for enc_epoch_to_load in epochs_to_load:
         ncRNA_probe = ncRNA_EMB_Classifier(input_size, args.hidden_size, output_size, device=device).to(device)
         print(ncRNA_probe)
-        optimizer = optim.Adam(ncRNA_probe.parameters(), lr=args.lr, amsgrad=True)
+        optimizer = optim.Adam(ncRNA_probe.parameters(), lr=args.lr)
 
         enc_epoch_weight_path = os.path.join(expr_investigate, 'model.epoch-%d' % enc_epoch_to_load)
         enc_epoch_dir = os.path.join(save_dir, 'enc-epoch-%d' % (enc_epoch_to_load))
@@ -124,6 +124,10 @@ if __name__ == "__main__":
             pretrain_model = JunctionTreeVAE(
                 512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='baseline',
                 use_flow_prior=True, device=device).to(device)
+        elif preprocess_type == 'jtvae_branched':
+            pretrain_model = JunctionTreeVAE(
+                512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='branched',
+                decoder_version='v1', use_flow_prior=True, device=device).to(device)
 
         pretrain_model.load_state_dict(
             torch.load(enc_epoch_weight_path, map_location=device)['model_weights'])
@@ -161,6 +165,7 @@ if __name__ == "__main__":
             shuffled_train_emb = train_emb[shuffle_idx]
             shuffled_train_label = np.array(train_label)[shuffle_idx]
 
+            ncRNA_probe.train()
             for idx in range(0, train_size, args.batch_size):
                 ncRNA_probe.zero_grad()
                 ret_dict = ncRNA_probe(shuffled_train_emb[idx: idx + args.batch_size],
@@ -169,6 +174,7 @@ if __name__ == "__main__":
                 loss.backward()
                 optimizer.step()
 
+            ncRNA_probe.eval()
             # validation loop
             train_loss, train_acc, train_f1_macro, train_f1_micro, train_mcc = evaluate(train_emb, train_label)
             valid_loss, valid_acc, valid_f1_macro, valid_f1_micro, valid_mcc = evaluate(valid_emb, valid_label)
@@ -219,9 +225,10 @@ if __name__ == "__main__":
             print('Loading best weights from: %s' % (best_valid_weight_path))
             ncRNA_probe.load_state_dict(torch.load(best_valid_weight_path)['model_weights'])
 
+        ncRNA_probe.eval()
         test_emb = convert_seq_to_embeddings(test_seq, pretrain_model, mp_pool, preprocess_type=preprocess_type)
         test_loss, test_acc, test_f1_macro, test_f1_micro, test_mcc = evaluate(test_emb, test_label)
-
+        print('Test acc:', test_acc)
         all_test_loss.append(test_loss)
         all_test_acc.append(test_acc)
         all_test_f1_macro.append(test_f1_macro)

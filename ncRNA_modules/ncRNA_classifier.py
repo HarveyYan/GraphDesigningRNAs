@@ -14,6 +14,7 @@ class ncRNA_EMB_Classifier(nn.Module):
         if self.hidden_size is not None:
             self.classifier_nonlinear = nn.Linear(input_size, self.hidden_size)
             self.classifier_output = nn.Linear(self.hidden_size, output_size)
+            self.dropout = nn.Dropout(p=0.5)
         else:
             self.classifier_output = nn.Linear(self.input_size, output_size)
 
@@ -25,7 +26,8 @@ class ncRNA_EMB_Classifier(nn.Module):
         batch_input = batch_input.to(self.device)
         batch_label = torch.as_tensor(batch_label.astype(np.long)).to(self.device)
         if self.hidden_size is not None:
-            preds = self.classifier_output(torch.relu(self.classifier_nonlinear(batch_input)))
+            intermediate = torch.relu(self.classifier_nonlinear(batch_input))
+            preds = self.classifier_output(self.dropout(intermediate))
         else:
             preds = self.classifier_output(batch_input)
 
