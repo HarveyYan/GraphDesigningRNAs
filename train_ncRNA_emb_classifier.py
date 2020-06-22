@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import argparse
 import torch.optim as optim
@@ -8,9 +9,9 @@ from sklearn.metrics import f1_score, matthews_corrcoef
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-from ncRNA_modules.ncRNA_dataloader import convert_seq_to_embeddings, read_fasta, \
-    all_classes, train_datapath, test_datapath
-from ncRNA_modules.ncRNA_classifier import ncRNA_EMB_Classifier
+from emb_models.emb_dataloader import convert_seq_to_embeddings, read_ncRNA_fasta, \
+    ncRNA_all_classes, ncRNA_train_datapath, ncRNA_test_datapath
+from emb_models.base_emb_model import EMB_Classifier
 import lib.plot_utils, lib.logger
 from baseline_models.FlowLSTMVAE import LSTMVAE
 from baseline_models.GraphLSTMVAE import GraphLSTMVAE
@@ -59,11 +60,11 @@ if __name__ == "__main__":
 
     preprocess_type = args.mode
     input_size = 128  # latent dimension
-    output_size = len(all_classes)
+    output_size = len(ncRNA_all_classes)
     train_val_split_ratio = 0.1
 
-    train_seq, train_label = read_fasta(train_datapath)
-    test_seq, test_label = read_fasta(test_datapath)
+    train_seq, train_label = read_ncRNA_fasta(ncRNA_train_datapath)
+    test_seq, test_label = read_ncRNA_fasta(ncRNA_test_datapath)
     train_label = np.array(train_label)
     test_label = np.array(test_label)
 
@@ -99,13 +100,17 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
+    outfile = open(os.path.join(save_dir, '%s.out' % (args.save_dir)), "w")
+    sys.stdout = outfile
+    sys.stderr = outfile
+
     all_test_loss, all_test_acc, all_test_f1_macro, all_test_f1_micro, all_test_mcc = \
         [], [], [], [], []
 
-    mp_pool = None # Pool(10)
+    mp_pool = Pool(10)
 
     for enc_epoch_to_load in epochs_to_load:
-        ncRNA_probe = ncRNA_EMB_Classifier(input_size, args.hidden_size, output_size, device=device).to(device)
+        ncRNA_probe = EMB_Classifier(input_size, args.hidden_size, output_size, device=device).to(device)
         print(ncRNA_probe)
         optimizer = optim.Adam(ncRNA_probe.parameters(), lr=args.lr)
 
