@@ -44,7 +44,7 @@ def evaluate(embedding, targets):
             all_preds.extend(ret_dict['preds'])
 
     all_loss /= size
-    pearson_corr = pearsonr(targets, all_preds)[0]
+    pearson_corr = pearsonr(targets[:, 0], np.array(all_preds)[:, 0])[0]
 
     return all_loss, pearson_corr
 
@@ -84,8 +84,9 @@ if __name__ == "__main__":
 
         train_seq, train_targets = read_rnacompete_datafile(train_datapath_filled)
         test_seq, test_targets = read_rnacompete_datafile(test_datapath_filled)
-        train_targets = np.array(train_targets)
-        test_targets = np.array(test_targets)
+
+        train_targets = np.array(train_targets)[:, None]
+        test_targets = np.array(test_targets)[:, None]
 
         if args.normalize_target is True:
             print('Note: normalizing training targets to [0, 1]')
@@ -112,14 +113,14 @@ if __name__ == "__main__":
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        outfile = open(os.path.join(save_dir, '%s-%s.out' % (rbp_name, args.save_dir)), "w")
-        sys.stdout = outfile
-        sys.stderr = outfile
+        # outfile = open(os.path.join(save_dir, '%s-%s.out' % (rbp_name, args.save_dir)), "w")
+        # sys.stdout = outfile
+        # sys.stderr = outfile
 
         all_test_loss, all_test_pearson_corr = [], []
 
         for enc_epoch_to_load in epochs_to_load:
-            loss_type = 'mse' if args.normalize_target is False else 'bce'
+            loss_type = 'mse' if args.normalize_target is False else 'binary_ce'
             rnacompete_probe = EMB_Classifier(
                 input_size, args.hidden_size, 1, device=device, loss_type=loss_type).to(device)
             print(rnacompete_probe)

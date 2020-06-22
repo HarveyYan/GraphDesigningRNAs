@@ -120,7 +120,7 @@ if __name__ == "__main__":
     mp_pool = Pool(8)
 
     for enc_epoch_to_load in epochs_to_load:
-        rbp_probe = EMB_Classifier(input_size, args.hidden_size, output_size, device=device).to(device)
+        rbp_probe = EMB_Classifier(input_size, args.hidden_size, output_size, device=device, loss_type='binary_ce').to(device)
         print(rbp_probe)
         optimizer = optim.Adam(rbp_probe.parameters(), lr=args.lr, amsgrad=True)
 

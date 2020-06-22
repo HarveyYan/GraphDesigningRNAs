@@ -155,7 +155,7 @@ def convert_seq_to_embeddings(all_seq, model, mp_pool, preprocess_type='lstm'):
 
 
 def lstm_joint_encoding_subroutine(seq):
-    if type(seq) is not str:
+    if type(seq) is np.ndarray:
         # convert numpy sequence to string
         seq = ''.join([NUC_VOCAB[nuc_idx] for nuc_idx in np.argmax(seq, axis=-1)])
 
@@ -171,7 +171,7 @@ def lstm_joint_encoding_subroutine(seq):
 def graph_encoding_subroutine(batch_seq):
     all_pairs = []
     for seq in batch_seq:
-        if type(seq) is not str:
+        if type(seq) is np.ndarray:
             # convert numpy sequence to string
             seq = ''.join([NUC_VOCAB[nuc_idx] for nuc_idx in np.argmax(seq, axis=-1)])
 
@@ -184,7 +184,7 @@ def graph_encoding_subroutine(batch_seq):
 def jtvae_encoding_subroutine(batch_seq, tree_enc_type='baseline'):
     all_trees = []
     for seq in batch_seq:
-        if type(seq) is not str:
+        if type(seq) is np.ndarray:
             # convert numpy sequence to string
             seq = ''.join([NUC_VOCAB[nuc_idx] for nuc_idx in np.argmax(seq, axis=-1)])
 

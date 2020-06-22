@@ -110,7 +110,8 @@ if __name__ == "__main__":
     mp_pool = Pool(10)
 
     for enc_epoch_to_load in epochs_to_load:
-        ncRNA_probe = EMB_Classifier(input_size, args.hidden_size, output_size, device=device).to(device)
+        ncRNA_probe = EMB_Classifier(input_size, args.hidden_size, output_size, device=device,
+                                     loss_type='ce').to(device)
         print(ncRNA_probe)
         optimizer = optim.Adam(ncRNA_probe.parameters(), lr=args.lr)
 
