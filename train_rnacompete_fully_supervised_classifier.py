@@ -52,6 +52,7 @@ if __name__ == "__main__":
     rbp_name = args.rbp_name
     if rbp_name == 'all':
         pass
+        all_rbps = rnacompete_all_rbps
     else:
         assert rbp_name in rnacompete_all_rbps
         all_rbps = [rbp_name]
@@ -95,7 +96,7 @@ if __name__ == "__main__":
         train_targets = np.array(train_targets)[train_idx]
         train_size = len(train_seq)
 
-        save_dir = os.path.join('full-rnacompete-regressor', '%s-%s' % (rbp_name, args.save_dir))
+        save_dir = os.path.join('full-rnacompete-regressor', args.save_dir, rbp_name)
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
