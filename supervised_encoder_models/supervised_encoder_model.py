@@ -64,13 +64,16 @@ class FULL_ENC_Model(nn.Module):
         batch_size = len(batch_label)
 
         if self.vae_type == 'lstm':
-            latent_vec = self.vae.encode(batch_input)
+            batch_joint_encodings, _ = batch_input
+            latent_vec = self.vae.encode(batch_joint_encodings)
             z_vec = self.vae.mean(latent_vec)
         elif self.vae_type == 'graph_lstm':
-            latent_vec = self.vae.encode(batch_input)
+            graph_encoder_input, _, _ = batch_input
+            latent_vec = self.vae.encode(graph_encoder_input)
             z_vec = self.vae.mean(latent_vec)
         elif self.vae_type == 'jtvae' or self.vae_type == 'jtvae_branched':
-            graph_vectors, tree_vectors = self.vae.encode(*batch_input)
+            _, graph_encoder_input, tree_encoder_input = batch_input
+            graph_vectors, tree_vectors = self.vae.encode(graph_encoder_input, tree_encoder_input)
             z_vec = torch.cat([self.vae.g_mean(graph_vectors),
                                self.vae.t_mean(tree_vectors)], dim=-1)
 

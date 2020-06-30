@@ -84,14 +84,18 @@ def lstm_joint_encoding_subroutine(seq):
 
     struct = RNA.fold(seq)[0]
     joint_encoding = []
+    label = []
     for seq_char, struct_char in zip(seq, struct):
         onehot_enc = np.array(list(map(lambda x: x == seq_char + struct_char, JOINT_VOCAB)),
                               dtype=np.float32)
         joint_encoding.append(onehot_enc)
-    return joint_encoding
+        label.append(np.argmax(onehot_enc))
+    return joint_encoding, label
 
 
 def graph_encoding_subroutine(batch_seq):
+    all_joint_encoding = []
+    all_label = []
     all_pairs = []
     for seq in batch_seq:
         if type(seq) is np.ndarray:
@@ -100,8 +104,19 @@ def graph_encoding_subroutine(batch_seq):
 
         struct = RNA.fold(seq)[0]
         all_pairs.append([seq, struct])
+
+        joint_encoding = []
+        label = []
+        for seq_char, struct_char in zip(seq, struct):
+            onehot_enc = np.array(list(map(lambda x: x == seq_char + struct_char, JOINT_VOCAB)), dtype=np.float32)
+            joint_encoding.append(onehot_enc)
+            label.append(np.argmax(onehot_enc))
+        all_joint_encoding.append(joint_encoding)
+        all_label.append(label)
+
     graph_encoder_input = GraphEncoder.prepare_batch_data(all_pairs)
-    return graph_encoder_input
+
+    return (graph_encoder_input, all_joint_encoding, all_label)
 
 
 def jtvae_encoding_subroutine(batch_seq, tree_enc_type='baseline'):
@@ -121,7 +136,7 @@ def jtvae_encoding_subroutine(batch_seq, tree_enc_type='baseline'):
     elif tree_enc_type == 'jtvae_branched':
         tree_encoder_input = BranchedTreeEncoder.prepare_batch_data(all_trees)
 
-    return (graph_encoder_input, tree_encoder_input)
+    return (all_trees, graph_encoder_input, tree_encoder_input)
 
 
 class TaskFolder:
@@ -180,14 +195,17 @@ class TaskDataset(Dataset):
             if self.preprocess_type == 'lstm':
 
                 batch_joint_encodings = []
+                batch_seq_label = []
                 for seq in batch_seq:
-                    batch_joint_encodings.append(lstm_joint_encoding_subroutine(seq))
-                return batch_joint_encodings, batch_label
+                    joint_encoding, label = lstm_joint_encoding_subroutine(seq)
+                    batch_joint_encodings.append(joint_encoding)
+                    batch_seq_label.append(label)
+                return (batch_joint_encodings, batch_seq_label), batch_label
 
             elif self.preprocess_type == 'graph_lstm':
 
-                graph_encoder_input = graph_encoding_subroutine(batch_seq)
-                return graph_encoder_input, batch_label
+                batch_graph_input = graph_encoding_subroutine(batch_seq)
+                return batch_graph_input, batch_label
 
             elif self.preprocess_type == 'jtvae' or self.preprocess_type == 'jtvae_branched':
 
