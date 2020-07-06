@@ -99,6 +99,8 @@ if __name__ == "__main__":
         save_dir = os.path.join('full-rnacompete-regressor', args.save_dir, rbp_name)
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+        else:
+            continue
 
         outfile = open(os.path.join(save_dir, '%s.out' % (args.save_dir)), "w")
         sys.stdout = outfile
