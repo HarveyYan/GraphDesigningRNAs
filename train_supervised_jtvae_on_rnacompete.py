@@ -207,6 +207,10 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
+    outfile = open(os.path.join(save_dir, 'run.out'), "w")
+    sys.stdout = outfile
+    sys.stderr = outfile
+
     backup_dir = os.path.join(save_dir, 'backup')
     if not os.path.exists(backup_dir):
         os.makedirs(backup_dir)
@@ -280,7 +284,7 @@ if __name__ == "__main__":
     best_valid_weight_path = None
     last_improved = 0
     # best_valid_loss = np.inf
-    last_10_epochs = []
+    last_5_epochs = []
     for epoch in range(1, args.epoch + 1):
         if last_improved >= 20:
             print('Have\'t improved for %d epochs' % (last_improved))
@@ -362,10 +366,10 @@ if __name__ == "__main__":
 
         # if valid_loss < best_valid_loss:
         # best_valid_loss = valid_loss
-        if len(last_10_epochs) >= 10:
-            to_remove_epoch = last_10_epochs.pop(0)
+        if len(last_5_epochs) >= 5:
+            to_remove_epoch = last_5_epochs.pop(0)
             os.remove(os.path.join(save_dir, "model.epoch-" + str(to_remove_epoch)))
-        last_10_epochs.append(epoch)
+        last_5_epochs.append(epoch)
         # best_valid_weight_path = os.path.join(save_dir, "model.epoch-" + str(epoch))
         torch.save(
             {'model_weights': model.state_dict(),

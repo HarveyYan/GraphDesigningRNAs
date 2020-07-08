@@ -77,6 +77,21 @@ def read_rbp_h5py(filepath, mode='train'):
     return all_np_seq, all_label
 
 
+def lstm_seqonly_encoding_subroutine(seq):
+    if type(seq) is np.ndarray:
+        # convert numpy sequence to string
+        seq = ''.join([NUC_VOCAB[nuc_idx] for nuc_idx in np.argmax(seq, axis=-1)])
+
+    encoding = []
+    label = []
+    for seq_char in seq:
+        onehot_enc = np.array(list(map(lambda x: x == seq_char, NUC_VOCAB)),
+                              dtype=np.float32)
+        encoding.append(onehot_enc)
+        label.append(np.argmax(onehot_enc))
+    return encoding, label
+
+
 def lstm_joint_encoding_subroutine(seq):
     if type(seq) is np.ndarray:
         # convert numpy sequence to string
@@ -143,8 +158,8 @@ class TaskFolder:
 
     def __init__(self, all_seq, all_labels, batch_size, num_workers=4, shuffle=True,
                  mode='train', preprocess_type='lstm'):
-        assert preprocess_type in ['lstm', 'graph_lstm', 'jtvae', 'jtvae_branched'], \
-            'preprocess type {} not found in {}'.format(preprocess_type, ['lstm', 'graph_lstm', 'jtvae'])
+        assert preprocess_type in ['lstm', 'lstm_seqonly', 'graph_lstm', 'jtvae', 'jtvae_branched'], \
+            'preprocess type {} not found in {}'.format(preprocess_type, ['lstm', 'lstm_seqonly', 'graph_lstm', 'jtvae', 'jtvae_branched'])
 
         self.all_seq = all_seq
         self.all_labels = all_labels
@@ -201,6 +216,16 @@ class TaskDataset(Dataset):
                     batch_joint_encodings.append(joint_encoding)
                     batch_seq_label.append(label)
                 return (batch_joint_encodings, batch_seq_label), batch_label
+
+            elif self.preprocess_type == 'lstm_seqonly':
+
+                batch_encodings = []
+                batch_seq_label = []
+                for seq in batch_seq:
+                    encoding, label = lstm_seqonly_encoding_subroutine(seq)
+                    batch_encodings.append(encoding)
+                    batch_seq_label.append(label)
+                return (batch_encodings, batch_seq_label), batch_label
 
             elif self.preprocess_type == 'graph_lstm':
 

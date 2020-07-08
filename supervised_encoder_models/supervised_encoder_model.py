@@ -5,6 +5,7 @@ import numpy as np
 from baseline_models.FlowLSTMVAE import LSTMVAE
 from baseline_models.GraphLSTMVAE import GraphLSTMVAE
 from jtvae_models.VAE import JunctionTreeVAE
+from baseline_models.SimpleSeqonlyVAE import SimpleSeqOnlyVAE
 
 
 class FULL_ENC_Model(nn.Module):
@@ -17,31 +18,38 @@ class FULL_ENC_Model(nn.Module):
         self.device = kwargs.get('device', torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
 
         self.vae_type = kwargs.get('vae_type', 'lstm')
-        assert self.vae_type in ['lstm', 'graph_lstm', 'jtvae', 'jtvae_branched']
+        assert self.vae_type in ['lstm', 'lstm_seqonly', 'graph_lstm', 'jtvae', 'jtvae_branched']
 
         if self.vae_type == 'lstm':
             self.vae = LSTMVAE(
                 512, 128, 2, device=self.device, use_attention=True,
                 use_flow_prior=False, use_aux_regressor=False).to(self.device)
             del self.vae.var
+            del self.vae.decoder
+        elif self.vae_type == 'lstm_seqonly':
+            self.vae = SimpleSeqOnlyVAE(
+                512, 128, 2, use_attention=True,
+                device=self.device).to(self.device)
         elif self.vae_type == 'graph_lstm':
             self.vae = GraphLSTMVAE(
                 512, 128, 10, device=self.device, use_attention=False,
                 use_flow_prior=False, use_aux_regressor=False).to(self.device)
             del self.vae.var
+            del self.vae.decoder
         elif self.vae_type == 'jtvae':
             self.vae = JunctionTreeVAE(
                 512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='baseline',
                 use_flow_prior=False, device=self.device).to(self.device)
             del self.vae.g_var
             del self.vae.t_var
+            del self.vae.decoder
         elif self.vae_type == 'jtvae_branched':
             self.vae = JunctionTreeVAE(
                 512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='branched',
                 decoder_version='v1', use_flow_prior=False, device=self.device).to(self.device)
             del self.vae.g_var
             del self.vae.t_var
-        del self.vae.decoder
+            del self.vae.decoder
 
         self.loss_type = kwargs.get('loss_type', 'mse')
         assert self.loss_type in ['mse', 'binary_ce', 'ce']
@@ -66,6 +74,10 @@ class FULL_ENC_Model(nn.Module):
         if self.vae_type == 'lstm':
             batch_joint_encodings, _ = batch_input
             latent_vec = self.vae.encode(batch_joint_encodings)
+            z_vec = self.vae.mean(latent_vec)
+        elif self.vae_type == 'lstm_seqonly':
+            batch_encodings, _ = batch_input
+            latent_vec = self.vae.encode(batch_encodings)
             z_vec = self.vae.mean(latent_vec)
         elif self.vae_type == 'graph_lstm':
             graph_encoder_input, _, _ = batch_input
