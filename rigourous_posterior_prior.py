@@ -60,8 +60,8 @@ if __name__ == "__main__":
     print(args)
 
     mode = args.mode
-    assert mode in ['lstm', 'graph_lstm', 'jtvae'], \
-        'mode must be one of {}'.format(['lstm', 'graph_lstm', 'jtvae'])
+    assert mode in ['lstm', 'graph_lstm', 'jtvae', 'jtvae_branched'], \
+        'mode must be one of {}'.format(['lstm', 'graph_lstm', 'jtvae', 'jtvae_branched'])
 
     all_fields = ['Epoch',
                   'Validation_recon_acc_with_reg', 'Validation_post_valid_with_reg',
@@ -140,17 +140,21 @@ if __name__ == "__main__":
             model = GraphLSTMVAE(
                 512, 128, 5, use_aux_regressor=False,
                 use_flow_prior=args.use_flow_prior, device=device).to(device)
-        else:
+        elif mode == 'jtvae':
             model = JunctionTreeVAE(
                 512, 64, 5, 10, decode_nuc_with_lstm=True, use_flow_prior=args.use_flow_prior,
                 tree_encoder_arch='baseline', device=device).to(device)
+        elif mode == 'jtvae_branched':
+            model = JunctionTreeVAE(
+                512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='branched',
+                decoder_version='v1', use_flow_prior=args.use_flow_prior, device = device).to(device)
 
         weight_path = os.path.join(expr_dir, 'model.epoch-%d' % (enc_epoch_to_load))
         print('Loading', weight_path)
         model.load_state_dict(
             torch.load(weight_path, map_location=device)['model_weights'])
 
-        if mode != 'jtvae':
+        if mode != 'jtvae' and mode != 'jtvae_branched':
             baseline_models.baseline_metrics.model = model
         else:
             jtvae_models.jtvae_utils.model = model
@@ -162,9 +166,12 @@ if __name__ == "__main__":
         elif mode == 'graph_lstm':
             loader = BasicGraphLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
                                              shuffle=False)
-        else:
+        elif mode == 'jtvae':
             loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
                                         shuffle=False)
+        elif mode == 'jtvae_branched':
+            loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+                                        shuffle=False, tree_encoder_arch='branched')
 
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set
         total = 0
@@ -203,7 +210,7 @@ if __name__ == "__main__":
                     all_struct = [''.join(tree.rna_struct) for tree in tree_batch]
 
                 ####################### evaluate posterior with regularity constraints ########################
-                if mode != 'jtvae':
+                if mode != 'jtvae' and mode != 'jtvae_branched':
                     ret_dict = baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
                                                            list(np.array(original_data)[:, 1]),
                                                            latent_vec, mp_pool, nb_encode=nb_encode,
@@ -228,7 +235,7 @@ if __name__ == "__main__":
                 post_fe_deviation_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
 
                 ####################### evaluate posterior without regularity constraints ########################
-                if mode != 'jtvae':
+                if mode != 'jtvae' and mode != 'jtvae_branched':
                     ret_dict = baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
                                                            list(np.array(original_data)[:, 1]),
                                                            latent_vec, mp_pool, nb_encode=nb_encode,
@@ -253,7 +260,7 @@ if __name__ == "__main__":
                 post_fe_deviation_noreg_len_normed += np.sum(ret_dict['posterior_fe_deviation_len_normed'])
 
                 ####################### evaluate posterior without regularity constraints and greedy ########################
-                if mode != 'jtvae':
+                if mode != 'jtvae' and mode != 'jtvae_branched':
                     ret_dict = baseline_evaluate_posterior(list(np.array(original_data)[:, 0]),
                                                            list(np.array(original_data)[:, 1]),
                                                            latent_vec, mp_pool, nb_encode=nb_encode,
@@ -294,14 +301,16 @@ if __name__ == "__main__":
             # posterior decoding without RNA regularity
             lib.plot_utils.plot('Validation_recon_acc_no_reg', recon_acc_noreg / total * 100, index=1)
             lib.plot_utils.plot('Validation_post_valid_no_reg', post_valid_noreg / total * 100, index=1)
-            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg, index=1)
+            lib.plot_utils.plot('Validation_post_fe_deviation_no_reg', post_fe_deviation_noreg / post_valid_noreg,
+                                index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg',
                                 post_fe_deviation_noreg_len_normed / post_valid_noreg, index=1)
 
             # posterior decoding without RNA regularity and deterministic
             lib.plot_utils.plot('Validation_recon_acc_no_reg_greedy',
                                 recon_acc_noreg_det / total * nb_decode * 100, index=1)  # only decoded once
-            lib.plot_utils.plot('Validation_post_valid_no_reg_greedy', post_valid_noreg_det / total * nb_decode * 100, index=1)
+            lib.plot_utils.plot('Validation_post_valid_no_reg_greedy', post_valid_noreg_det / total * nb_decode * 100,
+                                index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_no_reg_greedy',
                                 post_fe_deviation_noreg_det / post_valid_noreg_det, index=1)
             lib.plot_utils.plot('Validation_post_fe_deviation_len_normed_no_reg_greedy',
@@ -312,7 +321,7 @@ if __name__ == "__main__":
             prior_valid_noreg_det, prior_fe_deviation_noreg_det, prior_fe_deviation_noreg_det_len_normed, prior_uniqueness_noreg_det = 0., 0., 0., 0
 
             ####################### sampling from the prior ########################
-            if mode != 'jtvae':
+            if mode != 'jtvae' and mode != 'jtvae_branched':
                 sampled_latent_prior = torch.as_tensor(np.random.randn(10000, 128).astype(np.float32)).to(
                     device)
                 if args.use_flow_prior:
@@ -331,7 +340,7 @@ if __name__ == "__main__":
                 sampled_t_z = sampled_z[:, 64:]
 
             ######################## evaluate prior with regularity constraints ########################
-            if mode != 'jtvae':
+            if mode != 'jtvae' and mode != 'jtvae_branched':
                 ret_dict = baseline_evaluate_prior(
                     sampled_latent_prior, 10000, 10, mp_pool,
                     enforce_rna_prior=True)
@@ -358,7 +367,7 @@ if __name__ == "__main__":
                     prior_fe_deviation_reg_sto_len_normed += np.sum(ret_dict['prior_fe_deviation_len_normed'])
 
             ######################## evaluate prior without regularity constraints ########################
-            if mode != 'jtvae':
+            if mode != 'jtvae' and mode != 'jtvae_branched':
                 ret_dict = baseline_evaluate_prior(
                     sampled_latent_prior, 10000, 10, mp_pool,
                     enforce_rna_prior=False)
@@ -385,7 +394,7 @@ if __name__ == "__main__":
                     prior_fe_deviation_noreg_sto_len_normed += np.sum(ret_dict['prior_fe_deviation_len_normed'])
 
             ######################## evaluate prior without regularity constraints and greedy ########################
-            if mode != 'jtvae':
+            if mode != 'jtvae' and mode != 'jtvae_branched':
                 ret_dict = baseline_evaluate_prior(
                     sampled_latent_prior, 10000, 1, mp_pool,
                     enforce_rna_prior=False, prob_decode=False)
@@ -414,12 +423,14 @@ if __name__ == "__main__":
             prior_fe_deviation_noreg_det_len_normed += np.sum(ret_dict['prior_fe_deviation_len_normed'])
 
             lib.plot_utils.plot('Prior_valid_with_reg', prior_valid_reg_sto / 1000, index=1)
-            lib.plot_utils.plot('Prior_fe_deviation_with_reg', prior_fe_deviation_reg_sto / prior_valid_reg_sto, index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_with_reg', prior_fe_deviation_reg_sto / prior_valid_reg_sto,
+                                index=1)
             lib.plot_utils.plot('Prior_fe_deviation_len_normed_with_reg',
                                 prior_fe_deviation_reg_sto_len_normed / prior_valid_reg_sto, index=1)
 
             lib.plot_utils.plot('Prior_valid_no_reg', prior_valid_noreg_sto / 1000, index=1)
-            lib.plot_utils.plot('Prior_fe_deviation_no_reg', prior_fe_deviation_noreg_sto / prior_valid_noreg_sto, index=1)
+            lib.plot_utils.plot('Prior_fe_deviation_no_reg', prior_fe_deviation_noreg_sto / prior_valid_noreg_sto,
+                                index=1)
             lib.plot_utils.plot('Prior_fe_deviation_len_normed_no_reg',
                                 prior_fe_deviation_noreg_sto_len_normed / prior_valid_noreg_sto, index=1)
 

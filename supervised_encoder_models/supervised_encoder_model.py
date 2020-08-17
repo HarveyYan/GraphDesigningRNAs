@@ -64,7 +64,7 @@ class FULL_ENC_Model(nn.Module):
         if self.loss_type == 'mse':
             self.loss = nn.MSELoss(reduction="none")
         elif self.loss_type == 'binary_ce':
-            self.loss = nn.BCELoss(reduction="none")
+            self.loss = nn.BCEWithLogitsLoss(reduction="none")
         else:
             self.loss = nn.CrossEntropyLoss(reduction='none')
 
@@ -89,7 +89,7 @@ class FULL_ENC_Model(nn.Module):
             z_vec = torch.cat([self.vae.g_mean(graph_vectors),
                                self.vae.t_mean(tree_vectors)], dim=-1)
 
-        if self.loss_type == 'mse':
+        if self.loss_type == 'mse' or self.loss_type == 'binary_ce':
             batch_label = torch.as_tensor(batch_label.astype(np.float32)).to(self.device)
         else:
             batch_label = torch.as_tensor(batch_label.astype(np.long)).to(self.device)

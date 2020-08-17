@@ -31,6 +31,11 @@ rnacompete_train_datapath = os.path.join(basedir, 'data', 'RNAcompete_derived_da
 rnacompete_test_datapath = os.path.join(basedir, 'data', 'RNAcompete_derived_datasets', 'full', '{}_data_full_B.txt')
 rnacompete_all_rbps = ['Fusip', 'HuR', 'PTB', 'RBM4', 'SF2', 'SLM2', 'U1A', 'VTS1', 'YB1']
 
+# RNAcompete-S dataset information
+rnacompete_s_datapath = os.path.join(basedir, 'data', 'RNAcompete_S', 'predicted_centroid_structures', '{}.tab')
+rnacompete_s_pool_datapath = os.path.join(basedir, 'data', 'RNAcompete_S', 'predicted_centroid_structures', '8_Pool.tab')
+rnacompete_s_all_rbps = ['HuR', 'PTB', 'QKI', 'Vts1', 'RBMY', 'SF2', 'SLBP']
+
 # ncRNA dataset information
 ncRNA_train_datapath = os.path.join(basedir, 'data', 'ncRNA', 'dataset_Rfam_6320_13classes.fasta')
 ncRNA_test_datapath = os.path.join(basedir, 'data', 'ncRNA', 'dataset_Rfam_validated_2600_13classes.fasta')
@@ -40,6 +45,18 @@ ncRNA_all_classes = ['miRNA', '5S_rRNA', '5_8S_rRNA', 'ribozyme', 'CD-box', 'HAC
 # in-vivo RBP binding dataset information
 rbp_datapath = os.path.join(basedir, 'data', 'rbpdata', '{}')
 rbp_dataset_options = {'data_RBPslow.h5', 'data_RBPsmed.h5', 'data_RBPshigh.h5'}
+
+
+def read_rnacompete_s_tab(filepath, seq_limit=np.inf):
+    seqs = []
+    with open(filepath, 'r') as file:
+        for i, line in enumerate(file):
+            if i >= seq_limit:
+                break
+            line = line.rstrip()
+            seq = line.split('\t')[1]
+            seqs.append(seq.replace('T', 'U'))
+    return seqs
 
 
 def read_rnacompete_datafile(filepath):

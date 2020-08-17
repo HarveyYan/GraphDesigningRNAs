@@ -140,7 +140,7 @@ if __name__ == "__main__":
         test_loader = TaskFolder(test_seq, test_targets, args.batch_size, shuffle=False,
                                  preprocess_type=preprocess_type, num_workers=8)
         last_improved = 0
-        last_5_epochs = []
+        last_2_epochs = []
         for epoch in range(1, args.epoch + 1):
             if last_improved >= 20:
                 print('Have\'t improved for %d epochs' % (last_improved))
@@ -183,10 +183,10 @@ if __name__ == "__main__":
 
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
-                if len(last_5_epochs) >= 5:
-                    to_remove_epoch = last_5_epochs.pop(0)
+                if len(last_2_epochs) >= 2:
+                    to_remove_epoch = last_2_epochs.pop(0)
                     os.remove(os.path.join(save_dir, "model.epoch-" + str(to_remove_epoch)))
-                last_5_epochs.append(epoch)
+                last_2_epochs.append(epoch)
                 best_valid_weight_path = os.path.join(save_dir, "model.epoch-" + str(epoch))
                 torch.save(
                     {'model_weights': model.state_dict(),
