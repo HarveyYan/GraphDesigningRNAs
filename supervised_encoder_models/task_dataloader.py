@@ -50,13 +50,39 @@ rbp_dataset_options = {'data_RBPslow.h5', 'data_RBPsmed.h5', 'data_RBPshigh.h5'}
 def read_rnacompete_s_tab(filepath, seq_limit=np.inf):
     seqs = []
     with open(filepath, 'r') as file:
-        for i, line in enumerate(file):
-            if i >= seq_limit:
-                break
+        for line in file:
             line = line.rstrip()
-            seq = line.split('\t')[1]
-            seqs.append(seq.replace('T', 'U'))
-    return seqs
+            seqs.append(line.split('\t')[1].replace('T', 'U'))
+    if seq_limit > len(seqs):
+        return seqs
+    else:
+        return list(np.random.choice(seqs, seq_limit, False))
+
+
+def create_rnacompete_s_dataset(pos_raw_filepath, neg_raw_filepath, seq_limit=np.inf):
+    pos_seq = read_rnacompete_s_tab(pos_raw_filepath, seq_limit)
+    size_pos = len(pos_seq)
+    neg_seq = read_rnacompete_s_tab(neg_raw_filepath, size_pos)
+    size_neg = len(neg_seq)
+    print('all_sizes', size_pos + size_neg)
+    return pos_seq, neg_seq
+
+
+def read_curated_rnacompete_s_dataset(filepath):
+    pos_seq, neg_seq = [], []
+    label = None
+    with open(filepath, 'r') as file:
+        for line in file:
+            if line.startswith('>'):
+                label = int(line.rstrip().split(':')[-1])
+            else:
+                seq = line.rstrip()
+                if label == 1:
+                    pos_seq.append(seq)
+                else:
+                    neg_seq.append(seq)
+
+    return pos_seq, neg_seq
 
 
 def read_rnacompete_datafile(filepath):

@@ -68,9 +68,7 @@ class FULL_ENC_Model(nn.Module):
         else:
             self.loss = nn.CrossEntropyLoss(reduction='none')
 
-    def forward(self, batch_input, batch_label):
-        batch_size = len(batch_label)
-
+    def encode(self, batch_input):
         if self.vae_type == 'lstm':
             batch_joint_encodings, _ = batch_input
             latent_vec = self.vae.encode(batch_joint_encodings)
@@ -88,6 +86,29 @@ class FULL_ENC_Model(nn.Module):
             graph_vectors, tree_vectors = self.vae.encode(graph_encoder_input, tree_encoder_input)
             z_vec = torch.cat([self.vae.g_mean(graph_vectors),
                                self.vae.t_mean(tree_vectors)], dim=-1)
+        return z_vec
+
+    def predict(self, batch_input):
+        z_vec = self.encode(batch_input)
+
+        if self.hidden_size is not None:
+            preds = self.classifier_output(torch.relu(self.classifier_nonlinear(z_vec)))
+        else:
+            preds = self.classifier_output(batch_input)
+
+        if self.loss_type == 'mse':
+            preds = preds.cpu().detach().numpy()
+        elif self.loss_type == 'binary_ce':
+            preds = torch.sigmoid(preds).cpu().detach().numpy()
+        else:
+            preds = torch.softmax(preds, dim=-1).cpu().detach().numpy()
+
+        return preds
+
+    def forward(self, batch_input, batch_label):
+        batch_size = len(batch_label)
+
+        z_vec = self.encode(batch_input)
 
         if self.loss_type == 'mse' or self.loss_type == 'binary_ce':
             batch_label = torch.as_tensor(batch_label.astype(np.float32)).to(self.device)
