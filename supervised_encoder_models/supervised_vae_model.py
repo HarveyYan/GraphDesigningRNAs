@@ -49,7 +49,7 @@ class SUPERVISED_VAE_Model(nn.Module):
         if self.loss_type == 'mse':
             self.loss = nn.MSELoss(reduction="none")
         elif self.loss_type == 'binary_ce':
-            self.loss = nn.BCELoss(reduction="none")
+            self.loss = nn.BCEWithLogitsLoss(reduction="none")
         else:
             self.loss = nn.CrossEntropyLoss(reduction='none')
 
@@ -97,7 +97,7 @@ class SUPERVISED_VAE_Model(nn.Module):
                 ret_dict['prior_loss'] = -log_pz.mean()
 
 
-        if self.loss_type == 'mse':
+        if self.loss_type == 'mse' or self.loss_type == 'binary_ce':
             batch_label = torch.as_tensor(batch_label.astype(np.float32)).to(self.device)
         else:
             batch_label = torch.as_tensor(batch_label.astype(np.long)).to(self.device)
