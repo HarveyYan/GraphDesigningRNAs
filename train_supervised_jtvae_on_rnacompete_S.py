@@ -53,9 +53,9 @@ def evaluate(loader):
         for batch_input, batch_label in loader:
             # compute various metrics
             ret_dict = model(batch_input, batch_label)
-            all_loss += ret_dict['loss'].item()
+            all_loss += ret_dict['supervised_loss'].item()
 
-            all_preds.append(ret_dict['preds'])
+            all_preds.append(ret_dict['supervised_preds'])
             all_label.extend(batch_label)
     all_loss /= size
     acc = sum(np.array(all_label)[:, 0] == (np.concatenate(all_preds, axis=0)[:, 0] > 0.5).astype(np.int32)) / size
@@ -211,9 +211,9 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    # outfile = open(os.path.join(save_dir, 'run.out'), "w")
-    # sys.stdout = outfile
-    # sys.stderr = outfile
+    outfile = open(os.path.join(save_dir, 'run.out'), "w")
+    sys.stdout = outfile
+    sys.stderr = outfile
 
     backup_dir = os.path.join(save_dir, 'backup')
     if not os.path.exists(backup_dir):
