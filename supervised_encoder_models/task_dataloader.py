@@ -33,7 +33,8 @@ rnacompete_all_rbps = ['Fusip', 'HuR', 'PTB', 'RBM4', 'SF2', 'SLM2', 'U1A', 'VTS
 
 # RNAcompete-S dataset information
 rnacompete_s_datapath = os.path.join(basedir, 'data', 'RNAcompete_S', 'predicted_centroid_structures', '{}.tab')
-rnacompete_s_pool_datapath = os.path.join(basedir, 'data', 'RNAcompete_S', 'predicted_centroid_structures', '8_Pool.tab')
+rnacompete_s_pool_datapath = os.path.join(basedir, 'data', 'RNAcompete_S', 'predicted_centroid_structures',
+                                          '8_Pool.tab')
 rnacompete_s_all_rbps = ['HuR', 'PTB', 'QKI', 'Vts1', 'RBMY', 'SF2', 'SLBP']
 
 # ncRNA dataset information
@@ -47,6 +48,20 @@ rbp_datapath = os.path.join(basedir, 'data', 'rbpdata', '{}')
 rbp_dataset_options = {'data_RBPslow.h5', 'data_RBPsmed.h5', 'data_RBPshigh.h5'}
 
 
+######################## for htr-selex multilabel dataset ########################
+def read_htr_selex_fasta(filepath, nb_class):
+    seqs, labels = [], []
+    with open(filepath, 'r') as file:
+        for line in file:
+            if line.startswith('>'):
+                _labels = [int(l) for l in line.split('label:')[-1].rstrip().split(',')]
+                labels.append(np.array(list(map(lambda x: x in _labels, range(nb_class))), dtype=np.float32))
+            else:
+                seqs.append(line.rstrip())
+    return seqs, labels
+
+
+######################## for RNAcompte-S dataset ########################
 def read_rnacompete_s_tab(filepath, seq_limit=np.inf):
     seqs = []
     with open(filepath, 'r') as file:
@@ -85,6 +100,7 @@ def read_curated_rnacompete_s_dataset(filepath):
     return pos_seq, neg_seq
 
 
+######################## for RNAcompete dataset ########################
 def read_rnacompete_datafile(filepath):
     seqs, targets = [], []
     with open(filepath, 'r') as file:
@@ -96,6 +112,7 @@ def read_rnacompete_datafile(filepath):
     return seqs, targets
 
 
+######################## for ncRNA dataset ########################
 def read_ncRNA_fasta(filepath):
     seqs, labels = [], []
     seq = ''
@@ -113,6 +130,7 @@ def read_ncRNA_fasta(filepath):
     return seqs, labels
 
 
+######################## for in-vivo RBP binding dataset ########################
 def read_rbp_h5py(filepath, mode='train'):
     with h5py.File(filepath, 'r') as file:
         all_np_seq = np.array(file['%s_in_seq' % (mode)]).transpose(0, 2, 1)
@@ -120,6 +138,7 @@ def read_rbp_h5py(filepath, mode='train'):
     return all_np_seq, all_label
 
 
+######################## lstm-seqonly encoding subroutine ########################
 def lstm_seqonly_encoding_subroutine(seq):
     if type(seq) is np.ndarray:
         # convert numpy sequence to string
@@ -135,6 +154,7 @@ def lstm_seqonly_encoding_subroutine(seq):
     return encoding, label
 
 
+######################## lstm encoding subroutine ########################
 def lstm_joint_encoding_subroutine(seq):
     if type(seq) is np.ndarray:
         # convert numpy sequence to string
@@ -151,6 +171,7 @@ def lstm_joint_encoding_subroutine(seq):
     return joint_encoding, label
 
 
+######################## graph encoding subroutine ########################
 def graph_encoding_subroutine(batch_seq):
     all_joint_encoding = []
     all_label = []
@@ -177,6 +198,7 @@ def graph_encoding_subroutine(batch_seq):
     return (graph_encoder_input, all_joint_encoding, all_label)
 
 
+######################## jtvae encoding subroutine ########################
 def jtvae_encoding_subroutine(batch_seq, tree_enc_type='baseline'):
     all_trees = []
     for seq in batch_seq:
@@ -202,7 +224,8 @@ class TaskFolder:
     def __init__(self, all_seq, all_labels, batch_size, num_workers=4, shuffle=True,
                  mode='train', preprocess_type='lstm'):
         assert preprocess_type in ['lstm', 'lstm_seqonly', 'graph_lstm', 'jtvae', 'jtvae_branched'], \
-            'preprocess type {} not found in {}'.format(preprocess_type, ['lstm', 'lstm_seqonly', 'graph_lstm', 'jtvae', 'jtvae_branched'])
+            'preprocess type {} not found in {}'.format(preprocess_type, ['lstm', 'lstm_seqonly', 'graph_lstm', 'jtvae',
+                                                                          'jtvae_branched'])
 
         self.all_seq = all_seq
         self.all_labels = all_labels

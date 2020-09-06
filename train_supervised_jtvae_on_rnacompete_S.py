@@ -211,6 +211,7 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
+    np.save(os.path.join(save_dir, 'valid_idx'), valid_idx)
     outfile = open(os.path.join(save_dir, 'run.out'), "w")
     sys.stdout = outfile
     sys.stderr = outfile
