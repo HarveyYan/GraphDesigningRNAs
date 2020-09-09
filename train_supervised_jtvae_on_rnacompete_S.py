@@ -42,6 +42,7 @@ parser.add_argument('--clip_norm', type=float, default=50.0)
 parser.add_argument('--beta', type=float, default=0.0)
 parser.add_argument('--step_beta', type=float, default=0.002)
 parser.add_argument('--max_beta', type=float, default=1.0)
+parser.add_argument('--resume', type=eval, default=False, choices=[True, False])
 
 
 def evaluate(loader):
@@ -179,39 +180,55 @@ if __name__ == "__main__":
     train_val_split_ratio = 0.1
     loss_type = 'binary_ce'
 
-    datapath_train = 'data/RNAcompete_S/curated_dataset/' + rbp_name + '_train.fa'
-    train_pos, train_neg = read_curated_rnacompete_s_dataset(datapath_train)
-    train_seq = train_pos + train_neg
-    train_targets = [1] * len(train_pos) + [0] * len(train_neg)
+    ############### creating models
+    model = SUPERVISED_VAE_Model(input_size, args.hidden_size, output_size, device=device,
+                                 vae_type=preprocess_type, loss_type=loss_type).to(device)
+    print(model)
 
-    datapath_test = 'data/RNAcompete_S/curated_dataset/' + rbp_name + '_test.fa'
-    test_pos, test_neg = read_curated_rnacompete_s_dataset(datapath_test)
-    test_seq = test_pos + test_neg
-    test_targets = [1] * len(test_pos) + [0] * len(test_neg)
+    for param in model.parameters():
+        if param.dim() == 1:
+            nn.init.constant_(param, 0)
+        elif param.dim() >= 2:
+            nn.init.xavier_normal_(param)
 
-    train_targets = np.array(train_targets)[:, None]
-    test_targets = np.array(test_targets)[:, None]
+    param_norm = lambda m: math.sqrt(sum([p.norm().item() ** 2 for p in m.parameters()]))
+    grad_norm = lambda m: math.sqrt(sum([p.grad.norm().item() ** 2 for p in m.parameters() if p.grad is not None]))
+    print("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, amsgrad=True)
 
-    valid_idx = np.random.choice(np.arange(len(train_targets)), int(len(train_targets) * train_val_split_ratio),
-                                 replace=False)
-    valid_idx = np.array(valid_idx)
-    train_idx = np.setdiff1d(np.arange(len(train_targets)), valid_idx)
+    valid_idx = None
+    if args.resume:
+        weight_path = None
+        expr_dir = 'output/supervised-corrected-treeenc-jtvae-rnacompeteS'
+        for dirname in os.listdir(expr_dir):
+            if dirname.split('-')[2] == rbp_name:
+                valid_idx = np.load(os.path.join(expr_dir, dirname, 'valid_idx.npy'), allow_pickle=True)
+                weight_path = os.path.join(expr_dir, dirname, 'model.epoch-13')
+                epoch_to_start = 14
+                beta = 3e-3
+                if not os.path.exists(weight_path):
+                    weight_path = os.path.join(expr_dir, dirname, 'model.epoch-12')
+                    epoch_to_start = 13
+                break
 
-    valid_seq = np.array(train_seq)[valid_idx]
-    valid_targets = np.array(train_targets)[valid_idx]
-    val_size = len(valid_seq)
+        if weight_path is None:
+            raise ValueError('checkpoints not found')
+        else:
+            all_weights = torch.load(weight_path)
+            model.load_state_dict(all_weights['model_weights'])
+            optimizer.load_state_dict(all_weights['opt_weights'])
+            print('Loaded weights:', weight_path)
+            print('Loaded beta:', beta)
 
-    train_seq = np.array(train_seq)[train_idx]
-    train_targets = np.array(train_targets)[train_idx]
-    train_size = len(train_seq)
+    else:
+        epoch_to_start = 1
 
+    ############### creating expr dir and backing up files
     cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     save_dir = '/'.join(args.save_dir.split('/')[:-1] + [cur_time + '-' + args.save_dir.split('/')[-1]])
-
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    np.save(os.path.join(save_dir, 'valid_idx'), valid_idx)
     outfile = open(os.path.join(save_dir, 'run.out'), "w")
     sys.stdout = outfile
     sys.stderr = outfile
@@ -230,21 +247,6 @@ if __name__ == "__main__":
     else:
         shutil.copy(inspect.getfile(jtvae_models.BranchedTreeEncoder), backup_dir)
         shutil.copy(inspect.getfile(jtvae_models.ParallelAltDecoderV1), backup_dir)
-
-    model = SUPERVISED_VAE_Model(input_size, args.hidden_size, output_size, device=device,
-                                 vae_type=preprocess_type, loss_type=loss_type).to(device)
-    print(model)
-
-    for param in model.parameters():
-        if param.dim() == 1:
-            nn.init.constant_(param, 0)
-        elif param.dim() >= 2:
-            nn.init.xavier_normal_(param)
-
-    param_norm = lambda m: math.sqrt(sum([p.norm().item() ** 2 for p in m.parameters()]))
-    grad_norm = lambda m: math.sqrt(sum([p.grad.norm().item() ** 2 for p in m.parameters() if p.grad is not None]))
-    print("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, amsgrad=True)
 
     logger = lib.logger.CSVLogger(
         'run.csv', save_dir,
@@ -270,8 +272,40 @@ if __name__ == "__main__":
 
     lib.plot_utils.set_output_dir(save_dir)
     lib.plot_utils.suppress_stdout()
-    lib.plot_utils.set_first_tick(1)
+    lib.plot_utils.set_first_tick(epoch_to_start)
 
+    ############### dataset loading
+    datapath_train = 'data/RNAcompete_S/curated_dataset/' + rbp_name + '_train.fa'
+    train_pos, train_neg = read_curated_rnacompete_s_dataset(datapath_train)
+    train_seq = train_pos + train_neg
+    train_targets = [1] * len(train_pos) + [0] * len(train_neg)
+
+    datapath_test = 'data/RNAcompete_S/curated_dataset/' + rbp_name + '_test.fa'
+    test_pos, test_neg = read_curated_rnacompete_s_dataset(datapath_test)
+    test_seq = test_pos + test_neg
+    test_targets = [1] * len(test_pos) + [0] * len(test_neg)
+
+    train_targets = np.array(train_targets)[:, None]
+    test_targets = np.array(test_targets)[:, None]
+
+    if valid_idx is None:
+        print('creating new valid idx')
+        valid_idx = np.random.choice(np.arange(len(train_targets)), int(len(train_targets) * train_val_split_ratio),
+                                     replace=False)
+        np.save(os.path.join(save_dir, 'valid_idx'), valid_idx)
+
+    valid_idx = np.array(valid_idx)
+    train_idx = np.setdiff1d(np.arange(len(train_targets)), valid_idx)
+
+    valid_seq = np.array(train_seq)[valid_idx]
+    valid_targets = np.array(train_targets)[valid_idx]
+    val_size = len(valid_seq)
+
+    train_seq = np.array(train_seq)[train_idx]
+    train_targets = np.array(train_targets)[train_idx]
+    train_size = len(train_seq)
+
+    ############### prepare expr misc
     mp_pool = Pool(8)
     jtvae_models.jtvae_utils.model = model.vae
     beta = args.beta
@@ -290,7 +324,7 @@ if __name__ == "__main__":
     last_improved = 0
     # best_valid_loss = np.inf
     last_5_epochs = []
-    for epoch in range(1, args.epoch + 1):
+    for epoch in range(epoch_to_start, args.epoch + 1):
         if last_improved >= 20:
             print('Have\'t improved for %d epochs' % (last_improved))
             break
