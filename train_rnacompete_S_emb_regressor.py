@@ -4,13 +4,13 @@ import argparse
 import torch.optim as optim
 import numpy as np
 from multiprocessing import Pool
-from scipy.stats import pearsonr
+from sklearn.metrics import roc_auc_score
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import sys
 
-from emb_models.emb_dataloader import convert_seq_to_embeddings, read_rnacompete_datafile, \
-    rnacompete_all_rbps, rnacompete_train_datapath, rnacompete_test_datapath
+from emb_models.emb_dataloader import convert_seq_to_embeddings, rnacompete_s_all_rbps, \
+    read_curated_rnacompete_s_dataset
 from emb_models.base_emb_model import EMB_Classifier
 import lib.plot_utils, lib.logger
 from baseline_models.FlowLSTMVAE import LSTMVAE
@@ -26,7 +26,6 @@ parser.add_argument('--expr_path', type=str, default='')
 parser.add_argument('--mode', type=str, default='lstm')
 parser.add_argument('--lr', type=float, default=4e-4)
 parser.add_argument('--epoch', type=int, default=100)
-parser.add_argument('--normalize_target', type=eval, default=True, choices=[True, False])
 
 
 def evaluate(embedding, targets):
@@ -39,14 +38,15 @@ def evaluate(embedding, targets):
             latent_vec = embedding[idx: idx + args.batch_size]
             batch_targets = targets[idx: idx + args.batch_size]
             # compute various metrics
-            ret_dict = rnacompete_probe(latent_vec, batch_targets)
+            ret_dict = probe(latent_vec, batch_targets)
             all_loss += ret_dict['loss'].item()
-            all_preds.extend(ret_dict['preds'])
+            all_preds.append(ret_dict['preds'])
 
     all_loss /= size
-    pearson_corr = pearsonr(targets[:, 0], np.array(all_preds)[:, 0])[0]
+    acc = sum(targets[:, 0] == (np.concatenate(all_preds, axis=0)[:, 0] > 0.5).astype(np.int32)) / size
+    roc_auc = roc_auc_score(targets[:, 0], np.concatenate(all_preds, axis=0)[:, 0])
 
-    return all_loss, pearson_corr
+    return all_loss, acc, roc_auc
 
 
 if __name__ == "__main__":
@@ -57,15 +57,17 @@ if __name__ == "__main__":
     print(args)
     rbp_name = args.rbp_name
     if rbp_name == 'all':
-        all_rbps = rnacompete_all_rbps
+        all_rbps = rnacompete_s_all_rbps
     else:
-        assert rbp_name in rnacompete_all_rbps
+        assert rbp_name in rnacompete_s_all_rbps
         all_rbps = [rbp_name]
 
     preprocess_type = args.mode
     input_size = 128  # latent dimension
+    output_size = 1
     train_val_split_ratio = 0.1
-    mp_pool = Pool(8)
+    loss_type = 'binary_ce'
+    mp_pool = None  # Pool(8)
 
     expr_investigate = args.expr_path
     assert os.path.exists(expr_investigate), '%s does not exist' % (expr_investigate)
@@ -79,22 +81,18 @@ if __name__ == "__main__":
 
     for rbp_name in all_rbps:
 
-        train_datapath_filled = rnacompete_train_datapath.format(rbp_name)
-        test_datapath_filled = rnacompete_test_datapath.format(rbp_name)
+        datapath_train = 'data/RNAcompete_S/curated_dataset/' + rbp_name + '_train.fa'
+        train_pos, train_neg = read_curated_rnacompete_s_dataset(datapath_train)
+        train_seq = train_pos + train_neg
+        train_targets = [1] * len(train_pos) + [0] * len(train_neg)
 
-        train_seq, train_targets = read_rnacompete_datafile(train_datapath_filled)
-        test_seq, test_targets = read_rnacompete_datafile(test_datapath_filled)
+        datapath_test = 'data/RNAcompete_S/curated_dataset/' + rbp_name + '_test.fa'
+        test_pos, test_neg = read_curated_rnacompete_s_dataset(datapath_test)
+        test_seq = test_pos + test_neg
+        test_targets = [1] * len(test_pos) + [0] * len(test_neg)
 
         train_targets = np.array(train_targets)[:, None]
         test_targets = np.array(test_targets)[:, None]
-
-        if args.normalize_target is True:
-            print('Note: normalizing training targets to [0, 1]')
-            offset = np.min(train_targets)
-            diff = np.max(train_targets) - offset
-
-            train_targets = (np.array(train_targets) - offset) / diff
-            test_targets = (np.array(test_targets) - offset) / diff
 
         valid_idx = np.random.choice(np.arange(len(train_targets)), int(len(train_targets) * train_val_split_ratio),
                                      replace=False)
@@ -109,22 +107,20 @@ if __name__ == "__main__":
         train_targets = np.array(train_targets)[train_idx]
         train_size = len(train_seq)
 
-        save_dir = os.path.join(args.expr_path, 'rnacompete-regressor', '%s-%s' % (rbp_name, args.save_dir))
+        save_dir = os.path.join(args.expr_path, 'rnacompete-S-regressor', '%s-%s' % (rbp_name, args.save_dir))
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        # outfile = open(os.path.join(save_dir, '%s-%s.out' % (rbp_name, args.save_dir)), "w")
-        # sys.stdout = outfile
-        # sys.stderr = outfile
-
-        all_test_loss, all_test_pearson_corr = [], []
+        outfile = open(os.path.join(save_dir, '%s-%s.out' % (rbp_name, args.save_dir)), "w")
+        sys.stdout = outfile
+        sys.stderr = outfile
 
         for enc_epoch_to_load in epochs_to_load:
-            loss_type = 'mse' if args.normalize_target is False else 'binary_ce'
-            rnacompete_probe = EMB_Classifier(
-                input_size, args.hidden_size, 1, device=device, loss_type=loss_type).to(device)
-            print(rnacompete_probe)
-            optimizer = optim.Adam(rnacompete_probe.parameters(), lr=args.lr)
+
+            probe = EMB_Classifier(
+                input_size, args.hidden_size, output_size, device=device, loss_type=loss_type).to(device)
+            print(probe)
+            optimizer = optim.Adam(probe.parameters(), lr=args.lr)
 
             enc_epoch_weight_path = os.path.join(expr_investigate, 'model.epoch-%d' % enc_epoch_to_load)
             enc_epoch_dir = os.path.join(save_dir, 'enc-epoch-%d' % (enc_epoch_to_load))
@@ -139,11 +135,11 @@ if __name__ == "__main__":
                     use_flow_prior=True, use_aux_regressor=False).to(device)
             elif preprocess_type == 'jtvae':
                 pretrain_model = JunctionTreeVAE(
-                    512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='baseline',
+                    512, 64, 10, 5, decode_nuc_with_lstm=True, tree_encoder_arch='baseline',
                     use_flow_prior=True, device=device).to(device)
             elif preprocess_type == 'jtvae_branched':
                 pretrain_model = JunctionTreeVAE(
-                    512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='branched',
+                    512, 64, 10, 5, decode_nuc_with_lstm=True, tree_encoder_arch='branched',
                     decoder_version='v1', use_flow_prior=True, device=device).to(device)
 
             pretrain_model.load_state_dict(
@@ -158,7 +154,8 @@ if __name__ == "__main__":
             lib.plot_utils.set_output_dir(enc_epoch_dir)
             lib.plot_utils.suppress_stdout()
 
-            all_fields = ['epoch', 'train_loss', 'valid_loss', 'train_pearson_corr', 'valid_pearson_corr']
+            all_fields = ['epoch', 'train_loss', 'valid_loss', 'train_acc', 'valid_acc', 'train_roc_auc',
+                          'valid_roc_auc']
 
             logger = lib.logger.CSVLogger('run.csv', enc_epoch_dir, all_fields)
 
@@ -181,39 +178,42 @@ if __name__ == "__main__":
                 shuffled_train_emb = train_emb[shuffle_idx]
                 shuffled_train_targets = np.array(train_targets)[shuffle_idx]
 
-                rnacompete_probe.train()
+                probe.train()
                 for idx in range(0, train_size, args.batch_size):
-                    rnacompete_probe.zero_grad()
-                    ret_dict = rnacompete_probe(shuffled_train_emb[idx: idx + args.batch_size],
-                                                shuffled_train_targets[idx: idx + args.batch_size])
+                    probe.zero_grad()
+                    ret_dict = probe(shuffled_train_emb[idx: idx + args.batch_size],
+                                     shuffled_train_targets[idx: idx + args.batch_size])
                     loss = ret_dict['loss'] / ret_dict['nb_preds']
                     loss.backward()
                     optimizer.step()
 
-                rnacompete_probe.eval()
+                probe.eval()
                 # validation loop
-                train_loss, train_pearson_corr = evaluate(train_emb, train_targets)
-                valid_loss, valid_pearson_corr = evaluate(valid_emb, valid_targets)
+                train_loss, train_acc, train_roc_auc = evaluate(train_emb, train_targets)
+                valid_loss, valid_acc, valid_roc_auc = evaluate(valid_emb, valid_targets)
 
                 lib.plot_utils.plot('train_loss', train_loss)
-                lib.plot_utils.plot('train_pearson_corr', train_pearson_corr)
+                lib.plot_utils.plot('train_acc', train_acc)
+                lib.plot_utils.plot('train_roc_auc', train_roc_auc)
 
                 lib.plot_utils.plot('valid_loss', valid_loss)
-                lib.plot_utils.plot('valid_pearson_corr', valid_pearson_corr)
+                lib.plot_utils.plot('valid_acc', valid_acc)
+                lib.plot_utils.plot('valid_roc_auc', valid_roc_auc)
 
                 lib.plot_utils.set_xlabel_for_tick(index=0, label='epoch')
                 lib.plot_utils.flush()
                 lib.plot_utils.tick(index=0)
 
                 print(
-                    'Epoch %d, train_loss: %.2f, train_pearson_corr: %2f, '
-                    'valid_loss: %.2f, valid_pearson_corr: %.2f' %
-                    (epoch, train_loss, train_pearson_corr,
-                     valid_loss, valid_pearson_corr))
+                    'Epoch %d, train_loss: %.2f, train_acc: %2f, train_roc_auc: %2f, '
+                    'valid_loss: %.2f, valid_acc: %.2f, valid_roc_auc: %.2f' %
+                    (epoch, train_loss, train_acc, train_roc_auc,
+                     valid_loss, valid_acc, valid_roc_auc))
 
                 logger.update_with_dict({
                     'epoch': epoch, 'train_loss': train_loss, 'valid_loss': valid_loss,
-                    'train_pearson_corr': train_pearson_corr, 'valid_pearson_corr': valid_pearson_corr
+                    'train_acc': train_acc, 'valid_acc': valid_acc,
+                    'train_roc_auc': train_roc_auc, 'valid_roc_auc': valid_roc_auc
                 })
 
                 if valid_loss < best_valid_loss:
@@ -224,7 +224,7 @@ if __name__ == "__main__":
                     last_5_epochs.append(epoch)
                     best_valid_weight_path = os.path.join(enc_epoch_dir, "model.epoch-" + str(epoch))
                     torch.save(
-                        {'model_weights': rnacompete_probe.state_dict(),
+                        {'model_weights': probe.state_dict(),
                          'opt_weights': optimizer.state_dict()},
                         best_valid_weight_path)
                     print('Validation loss improved, saving current weights to path:', best_valid_weight_path)
@@ -234,38 +234,15 @@ if __name__ == "__main__":
 
             if best_valid_weight_path is not None:
                 print('Loading best weights from: %s' % (best_valid_weight_path))
-                rnacompete_probe.load_state_dict(torch.load(best_valid_weight_path)['model_weights'])
+                probe.load_state_dict(torch.load(best_valid_weight_path)['model_weights'])
 
-            rnacompete_probe.eval()
+            probe.eval()
             test_emb = convert_seq_to_embeddings(test_seq, pretrain_model, mp_pool, preprocess_type=preprocess_type)
-            test_loss, test_pearson_corr = evaluate(test_emb, test_targets)
-            print('Test pearson correlation:', test_pearson_corr)
-            all_test_loss.append(test_loss)
-            all_test_pearson_corr.append(test_pearson_corr)
+            test_loss, test_acc, test_roc_auc = evaluate(test_emb, test_targets)
+            print('Test acc:', test_acc)
+            print('Test roc auc:', test_roc_auc)
 
             logger.close()
-
-        font = {'fontname': 'Times New Roman', 'size': 14}
-        plt.clf()
-        ax = plt.figure(figsize=(5., 5.)).gca()
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        plt.plot(epochs_to_load, all_test_loss)
-        plt.xlabel('epoch', **font)
-        ax.set_xlim(xmin=epochs_to_load[0])
-        plt.ylabel('test_loss', **font)
-        plt.savefig(os.path.join(save_dir, 'test_loss.png'), dpi=350)
-
-        plt.clf()
-        ax = plt.figure(figsize=(5., 5.)).gca()
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        plt.plot(epochs_to_load, all_test_pearson_corr)
-        plt.xlabel('epoch', **font)
-        ax.set_xlim(xmin=epochs_to_load[0])
-        plt.ylabel('test_pearson_corr', **font)
-        plt.savefig(os.path.join(save_dir, 'test_pearson_corr.png'), dpi=350)
-
-        np.savetxt(os.path.join(save_dir, 'all_test_metrics'),
-                   [all_test_loss, all_test_pearson_corr])
 
     if mp_pool is not None:
         mp_pool.close()

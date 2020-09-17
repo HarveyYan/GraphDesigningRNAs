@@ -30,6 +30,12 @@ rnacompete_train_datapath = os.path.join(basedir, 'data', 'RNAcompete_derived_da
 rnacompete_test_datapath = os.path.join(basedir, 'data', 'RNAcompete_derived_datasets', 'full', '{}_data_full_B.txt')
 rnacompete_all_rbps = ['Fusip', 'HuR', 'PTB', 'RBM4', 'SF2', 'SLM2', 'U1A', 'VTS1', 'YB1']
 
+# RNAcompete-S dataset information
+rnacompete_s_datapath = os.path.join(basedir, 'data', 'RNAcompete_S', 'predicted_centroid_structures', '{}.tab')
+rnacompete_s_pool_datapath = os.path.join(basedir, 'data', 'RNAcompete_S', 'predicted_centroid_structures',
+                                          '8_Pool.tab')
+rnacompete_s_all_rbps = ['HuR', 'PTB', 'QKI', 'Vts1', 'RBMY', 'SF2', 'SLBP']
+
 # ncRNA dataset information
 ncRNA_train_datapath = os.path.join(basedir, 'data', 'ncRNA', 'dataset_Rfam_6320_13classes.fasta')
 ncRNA_test_datapath = os.path.join(basedir, 'data', 'ncRNA', 'dataset_Rfam_validated_2600_13classes.fasta')
@@ -39,6 +45,45 @@ ncRNA_all_classes = ['miRNA', '5S_rRNA', '5_8S_rRNA', 'ribozyme', 'CD-box', 'HAC
 # in-vivo RBP binding dataset information
 rbp_datapath = os.path.join(basedir, 'data', 'rbpdata', '{}')
 rbp_dataset_options = {'data_RBPslow.h5', 'data_RBPsmed.h5', 'data_RBPshigh.h5'}
+
+
+######################## for RNAcompte-S dataset ########################
+def read_rnacompete_s_tab(filepath, seq_limit=np.inf):
+    seqs = []
+    with open(filepath, 'r') as file:
+        for line in file:
+            line = line.rstrip()
+            seqs.append(line.split('\t')[1].replace('T', 'U'))
+    if seq_limit > len(seqs):
+        return seqs
+    else:
+        return list(np.random.choice(seqs, seq_limit, False))
+
+
+def create_rnacompete_s_dataset(pos_raw_filepath, neg_raw_filepath, seq_limit=np.inf):
+    pos_seq = read_rnacompete_s_tab(pos_raw_filepath, seq_limit)
+    size_pos = len(pos_seq)
+    neg_seq = read_rnacompete_s_tab(neg_raw_filepath, size_pos)
+    size_neg = len(neg_seq)
+    print('all_sizes', size_pos + size_neg)
+    return pos_seq, neg_seq
+
+
+def read_curated_rnacompete_s_dataset(filepath):
+    pos_seq, neg_seq = [], []
+    label = None
+    with open(filepath, 'r') as file:
+        for line in file:
+            if line.startswith('>'):
+                label = int(line.rstrip().split(':')[-1])
+            else:
+                seq = line.rstrip()
+                if label == 1:
+                    pos_seq.append(seq)
+                else:
+                    neg_seq.append(seq)
+
+    return pos_seq, neg_seq
 
 
 def read_rnacompete_datafile(filepath):
@@ -113,11 +158,12 @@ def convert_seq_to_embeddings(all_seq, model, mp_pool, preprocess_type='lstm'):
                 all_latent_vec.append(z_vec)
 
     elif preprocess_type == 'jtvae':
-        from tqdm import tqdm
+        # from tqdm import tqdm
         batches = [all_seq[i: i + 32] for i in range(0, size, 32)]
         if mp_pool is None:
             all_inputs = []
-            for batch in tqdm(batches):
+            # for batch in tqdm(batches):
+            for batch in batches:
                 all_inputs.append(jtvae_encoding_subroutine(batch))
         else:
             all_inputs = list(mp_pool.imap(jtvae_encoding_subroutine, batches))
