@@ -83,11 +83,11 @@ if __name__ == "__main__":
 
     expr_dir = args.expr_dir
     if args.focus_epoch is not None:
-        save_dir = os.path.join(expr_dir, 'rigorosity-epoch-%d' % (args.focus_epoch))
+        save_dir = os.path.join(expr_dir, 'rigorosity-test-epoch-%d' % (args.focus_epoch))
 
         epochs_to_load = [args.focus_epoch]
     else:
-        save_dir = os.path.join(expr_dir, 'rigorosity')
+        save_dir = os.path.join(expr_dir, 'rigorosity-test')
 
         epochs_to_load = []
         for dirname in os.listdir(expr_dir):
@@ -142,11 +142,11 @@ if __name__ == "__main__":
                 use_flow_prior=args.use_flow_prior, device=device).to(device)
         elif mode == 'jtvae':
             model = JunctionTreeVAE(
-                512, 64, 5, 10, decode_nuc_with_lstm=True, use_flow_prior=args.use_flow_prior,
+                512, 64, 10, 5, decode_nuc_with_lstm=True, use_flow_prior=args.use_flow_prior,
                 tree_encoder_arch='baseline', device=device).to(device)
         elif mode == 'jtvae_branched':
             model = JunctionTreeVAE(
-                512, 64, 5, 10, decode_nuc_with_lstm=True, tree_encoder_arch='branched',
+                512, 64, 10, 5, decode_nuc_with_lstm=True, tree_encoder_arch='branched',
                 decoder_version='v1', use_flow_prior=args.use_flow_prior, device = device).to(device)
 
         weight_path = os.path.join(expr_dir, 'model.epoch-%d' % (enc_epoch_to_load))
@@ -161,16 +161,16 @@ if __name__ == "__main__":
 
         valid_batch_size = 256
         if mode == 'lstm':
-            loader = BasicLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+            loader = BasicLSTMVAEFolder('data/rna_jt_32-512/test-split', valid_batch_size, num_workers=4,
                                         shuffle=False)
         elif mode == 'graph_lstm':
-            loader = BasicGraphLSTMVAEFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+            loader = BasicGraphLSTMVAEFolder('data/rna_jt_32-512/test-split', valid_batch_size, num_workers=4,
                                              shuffle=False)
         elif mode == 'jtvae':
-            loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+            loader = JunctionTreeFolder('data/rna_jt_32-512/test-split', valid_batch_size, num_workers=4,
                                         shuffle=False)
         elif mode == 'jtvae_branched':
-            loader = JunctionTreeFolder('data/rna_jt_32-512/validation-split', valid_batch_size, num_workers=4,
+            loader = JunctionTreeFolder('data/rna_jt_32-512/test-split', valid_batch_size, num_workers=4,
                                         shuffle=False, tree_encoder_arch='branched')
 
         nb_iters = 20000 // valid_batch_size  # 20000 is the size of the validation set

@@ -46,6 +46,7 @@ class BasicLSTMVAEFolder:
                                int(fn.split('-')[-1].split('.')[0]) <= self.limit_data]
         else:
             self.data_files = [fn for fn in os.listdir(data_folder)]
+        self.is_test = 'test-split' in data_folder
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle
@@ -55,6 +56,10 @@ class BasicLSTMVAEFolder:
             fn = os.path.join(self.data_folder, fn)
             with open(fn, 'rb') as f:
                 data = pickle.load(f)
+
+            # limit test data examples to 20,000
+            if self.is_test:
+                data = data[:20000]
 
             if self.shuffle:
                 random.shuffle(data)

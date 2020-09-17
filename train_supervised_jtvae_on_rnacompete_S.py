@@ -179,6 +179,7 @@ if __name__ == "__main__":
     output_size = 1
     train_val_split_ratio = 0.1
     loss_type = 'binary_ce'
+    beta = args.beta
 
     ############### creating models
     model = SUPERVISED_VAE_Model(input_size, args.hidden_size, output_size, device=device,
@@ -199,16 +200,17 @@ if __name__ == "__main__":
     valid_idx = None
     if args.resume:
         weight_path = None
-        expr_dir = 'output/supervised-corrected-treeenc-jtvae-rnacompeteS'
+        expr_dir = 'output/supervised-corrected-treeenc-jtvae-rnacompeteS-mb-5e-3'
         for dirname in os.listdir(expr_dir):
             if dirname.split('-')[2] == rbp_name:
                 valid_idx = np.load(os.path.join(expr_dir, dirname, 'valid_idx.npy'), allow_pickle=True)
-                weight_path = os.path.join(expr_dir, dirname, 'model.epoch-13')
-                epoch_to_start = 14
-                beta = 3e-3
+                weight_path = os.path.join(expr_dir, dirname, 'model.epoch-16')
+                epoch_to_start = 17
+                beta = 5e-3
                 if not os.path.exists(weight_path):
-                    weight_path = os.path.join(expr_dir, dirname, 'model.epoch-12')
-                    epoch_to_start = 13
+                    weight_path = os.path.join(expr_dir, dirname, 'model.epoch-14')
+                    epoch_to_start = 15
+                    beta = 4.5e-3
                 break
 
         if weight_path is None:
@@ -308,7 +310,6 @@ if __name__ == "__main__":
     ############### prepare expr misc
     mp_pool = Pool(8)
     jtvae_models.jtvae_utils.model = model.vae
-    beta = args.beta
     total_step = 0
     meters = np.zeros(8)
 
